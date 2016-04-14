@@ -64,6 +64,11 @@ options:
         This is mutually exclusive with 'alert_policy_id'
     required: False
     default: None
+  additional_network:
+    description:
+      - The additional network id/name that needs to be added to the server
+    required: False
+    default: None
   state:
     description:
       - The state to insure that the provided resources are in.
@@ -111,6 +116,22 @@ EXAMPLES = '''
         - UC1TESTSVR02
     memory: 8
     state: present
+
+- name: add a secondary nic
+  clc_modify_server:
+    server_ids:
+        - UC1TESTSVR01
+        - UC1TESTSVR02
+    additional_network: 613a25aff2124d10a71b16cd6fb28975
+    state: present
+
+- name: remove a secondary nic
+  clc_modify_server:
+    server_ids:
+        - UC1TESTSVR01
+        - UC1TESTSVR02
+    additional_network: '10.11.12.0/24'
+    state: absent
 
 - name: set the anti affinity policy on a server
   clc_modify_server:
@@ -415,13 +436,15 @@ class ClcModifyServer:
         argument_spec = dict(
             server_ids=dict(type='list', required=True),
             state=dict(default='present', choices=['present', 'absent']),
+            location=dict(),
             cpu=dict(),
             memory=dict(),
             anti_affinity_policy_id=dict(),
             anti_affinity_policy_name=dict(),
             alert_policy_id=dict(),
             alert_policy_name=dict(),
-            wait=dict(type='bool', default=True)
+            wait=dict(type='bool', default=True),
+            additional_network=dict(),
         )
         mutually_exclusive = [
             ['anti_affinity_policy_id', 'anti_affinity_policy_name'],
@@ -485,11 +508,13 @@ class ClcModifyServer:
             'anti_affinity_policy_name': p.get('anti_affinity_policy_name'),
             'alert_policy_id': p.get('alert_policy_id'),
             'alert_policy_name': p.get('alert_policy_name'),
+            'additional_network': p.get('additional_network'),
         }
         changed = False
         server_changed = False
         aa_changed = False
         ap_changed = False
+        nic_changed = False
         server_dict_array = []
         result_server_ids = []
         request_list = []
@@ -514,6 +539,9 @@ class ClcModifyServer:
                 ap_changed = self._ensure_alert_policy_present(
                     server,
                     server_params)
+                nic_changed = self._ensure_nic_present(
+                    server,
+                    server_params)
             elif state == 'absent':
                 aa_changed = self._ensure_aa_policy_absent(
                     server,
@@ -521,7 +549,10 @@ class ClcModifyServer:
                 ap_changed = self._ensure_alert_policy_absent(
                     server,
                     server_params)
-            if server_changed or aa_changed or ap_changed:
+                nic_changed = self._ensure_nic_absent(
+                    server,
+                    server_params)
+            if server_changed or aa_changed or ap_changed or nic_changed:
                 changed_servers.append(server)
                 changed = True
 
@@ -594,6 +625,163 @@ class ClcModifyServer:
                 msg='Unable to update the server configuration for server : "{0}". {1}'.format(
                     server_id, str(ex.response_text)))
         return result
+
+    @staticmethod
+    def _modify_add_nic(clc, module, server_id):
+        """
+        Add a secondary nic to existing clc server
+        :param clc: the clc-sdk instance to use
+        :param module: the AnsibleModule object
+        :param server_id: id of the server to modify
+        :return:
+        """
+        result = None
+        acct_alias = clc.v2.Account.GetAlias()
+        datacenter = ClcModifyServer._find_datacenter(clc, module)
+        additional_network = ClcModifyServer._find_network_id(module, datacenter)
+        wait = module.params.get('wait', False)
+        if not module.check_mode:
+            try:
+                if wait:
+                    job_obj = clc.v2.Server(alias=acct_alias, id=server_id). \
+                        AddNIC(network_id=additional_network). \
+                        WaitUntilComplete()
+                else:
+                    job_obj = clc.v2.Server(alias=acct_alias, id=server_id). \
+                        AddNIC(network_id=additional_network)
+                result = True
+            except APIFailedResponse as ex:
+                if "already has an adapter" in str(ex.response_text):
+                    result = False
+                else:
+                    module.fail_json(
+                        msg='Unable to update the server configuration for server : "{0}". {1}'.format(
+                            server_id, str(ex.response_text)))
+        return result
+
+    @staticmethod
+    def _modify_remove_nic(clc, module, server_id):
+      result = None
+
+      acct_alias = clc.v2.Account.GetAlias()
+      dc = ClcModifyServer._find_datacenter(clc, module)
+      network = ClcModifyServer._find_network_id(module, dc)
+      wait = module.params.get('wait', False)
+
+      if not module.check_mode:
+        try:
+          if wait:
+            clc.v2.Server(alias=acct_alias, id=server_id).RemoveNIC(network_id=network).WaitUntilComplete()
+            result = True
+          else:
+            clc.v2.Server(alias=acct_alias, id=server_id).RemoveNIC(network_id=network)
+            result = True
+        except CLCException as ex:
+          result = False
+          module.fail_json(
+            msg='Unable to remove NIC from server : "{0}". {1}'.format(
+                    server_id, str(ex.message))
+          )
+
+      return result
+
+    @staticmethod
+    def _find_datacenter(clc, module):
+        """
+        Find the datacenter by calling the CLC API.
+        :param clc: clc-sdk instance to use
+        :param module: module to validate
+        :return: clc-sdk.Datacenter instance
+        """
+        location = module.params.get('location')
+        try:
+            if not location:
+                account = clc.v2.Account()
+                location = account.data.get('primaryDataCenter')
+            data_center = clc.v2.Datacenter(location)
+            return data_center
+        except CLCException as ex:
+            module.fail_json(
+                msg=str(
+                    "Unable to find location: {0}. {1}".format(location, ex.message)))
+
+    @staticmethod
+    def _find_network_id(module, datacenter):
+        """
+        Validate the provided network id or return a default.
+        :param module: the module to validate
+        :param datacenter: the datacenter to search for a network id
+        :return: a valid network id
+        """
+        additional_network = module.params.get('additional_network')
+        network_id = None
+
+        # Validates provided network id
+        # Allows lookup of network by id, name, or cidr notation
+        if additional_network:
+            network = datacenter.Networks(forced_load=True).Get(additional_network)
+            if network:
+                network_id = network.id
+            else:
+                return module.fail_json(
+                    msg='Unable to find a network with name/id "{}" at location: {}'.format(
+                            additional_network,
+                            datacenter.id))
+
+        if not network_id:
+            try:
+                network_id = datacenter.Networks().networks[0].id
+                # -- added for clc-sdk 2.23 compatibility
+                # datacenter_networks = clc_sdk.v2.Networks(
+                #   networks_lst=datacenter._DeploymentCapabilities()['deployableNetworks'])
+                # network_id = datacenter_networks.networks[0].id
+                # -- end
+            except CLCException:
+                module.fail_json(
+                    msg=str(
+                        "Unable to find a network in location: " +
+                        datacenter.id))
+
+        return network_id
+
+    def _ensure_nic_present(self, server, server_params):
+        """
+
+        :param server: server to add nic
+        :param server_params: add_nic method
+        :return:
+        """
+
+        changed = False
+
+        additional_network = server_params.get('additional_network')
+        if additional_network:
+            if not self.module.check_mode:
+                add_nic = self._modify_add_nic(
+                    self.clc,
+                    self.module,
+                    server.id)
+                changed = add_nic
+        return changed
+
+    def _ensure_nic_absent(self, server, server_params):
+      """
+
+      :param server: server from which to remove nic
+      :param server_params: map of server params
+      :return: True or False
+      """
+      changed = False
+
+      additional_network = server_params.get('additional_network', False)
+      if additional_network:
+        if not self.module.check_mode:
+          changed = self._modify_remove_nic(
+            self.clc
+            , self.module
+            , server.id)
+
+      return changed
 
     @staticmethod
     def _wait_for_requests(module, request_list):
