@@ -24,7 +24,7 @@ module: clc_group_fact
 short_description: Get facts about groups in CenturyLink Cloud.
 description:
   - An Ansible module to retrieve facts about groups in CenturyLink Cloud.
-version_added: "2.0"
+version_added: "2.1"
 options:
   group_id:
     description:
@@ -180,7 +180,6 @@ server:
                 "status": "active",
                 "type": "default"
             }
-        }
 '''
 
 __version__ = '${version}'
@@ -213,9 +212,14 @@ class ClcGroupFact:
         self._set_clc_credentials_from_env()
         group_id = self.module.params.get('group_id')
 
-        r = requests.get(self._get_endpoint(group_id), headers={
-            'Authorization': 'Bearer ' + self.v2_api_token
-        })
+        try:
+            r = requests.get(self._get_endpoint(group_id), headers={
+                'Authorization': 'Bearer ' + self.v2_api_token
+            })
+        except requests.exceptions.RequestException as re:
+            self.module.fail_json(
+                msg='Unable to fetch the group facts for group id : {0}. {1}'.format(group_id, re.message)
+            )
 
         if r.status_code not in [200]:
             self.module.fail_json(
@@ -223,10 +227,10 @@ class ClcGroupFact:
                 group_id)
 
         r = r.json()
-        servers = r['server'] = []
+        servers = r['servers'] = []
 
         for l in r['links']:
-            if 'servers' == l['rel']:
+            if 'server' == l['rel']:
                 servers.append(l['id'])
 
         self.module.exit_json(changed=False, group=r)

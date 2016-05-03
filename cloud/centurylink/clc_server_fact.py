@@ -24,7 +24,7 @@ module: clc_server_fact
 short_description: Get facts about servers in CenturyLink Cloud.
 description:
   - An Ansible module to retrieve facts about servers in CenturyLink Cloud.
-version_added: "2.0"
+version_added: "2.1"
 options:
   server_id:
     description:
@@ -110,8 +110,10 @@ server:
                     "inMaintenanceMode": false,
                     "ipAddresses": [
                         {
-                            "internal": "10.141.19.15"
+                            "internal": "10.100.121.210",
+                            "public": "206.152.34.248"
                         }
+
                     ],
                     "memoryMB": 2048,
                     "partitions": [
@@ -136,6 +138,7 @@ server:
                 "displayName": "UC1WFADWRDPRS10",
                 "groupId": "0e330aec1d2f46cfbf77b5b06d50e733",
                 "id": "uc1wfadwrdprs10",
+                "ipaddress": "10.100.121.210",
                 "isTemplate": false,
                 "links": [
                     {
@@ -221,11 +224,11 @@ server:
                 "name": "UC1WFADWRDPRS10",
                 "os": "ubuntu14_64Bit",
                 "osType": "Ubuntu 14 64-bit",
+                "publicip": "206.152.34.248",
                 "status": "active",
                 "storageType": "standard",
                 "type": "standard"
             }
-        }
 '''
 
 __version__ = '${version}'
@@ -258,9 +261,14 @@ class ClcServerFact:
         self._set_clc_credentials_from_env()
         server_id = self.module.params.get('server_id')
 
-        r = requests.get(self._get_endpoint(server_id), headers={
-            'Authorization': 'Bearer ' + self.v2_api_token
-        })
+        try:
+            r = requests.get(self._get_endpoint(server_id), headers={
+                'Authorization': 'Bearer ' + self.v2_api_token
+            })
+        except requests.exceptions.RequestException as re:
+            self.module.fail_json(
+                msg='Unable to fetch the server facts for server : {0}. {1}'.format(server_id, re.message)
+            )
 
         if r.status_code not in [200]:
             self.module.fail_json(
@@ -268,6 +276,13 @@ class ClcServerFact:
                 server_id)
 
         r = r.json()
+        if r['details']['memoryMB']:
+            r['details']['memory'] = int(r['details']['memoryMB'] / 1024)
+        if len(r['details']['ipAddresses']) > 0:
+            r['ipaddress'] = r['details']['ipAddresses'][0]['internal']
+            publicips = [ a for a in r['details']['ipAddresses'] if 'public' in a ]
+            if len(publicips) > 0:
+                r['publicip'] = publicips[0]
 
         if self.module.params.get('credentials'):
             r['credentials'] = self._get_server_credentials(server_id)
@@ -288,9 +303,14 @@ class ClcServerFact:
 
     def _get_server_credentials(self, server_id):
 
-        r = requests.get(self._get_endpoint(server_id) + '/credentials', headers={
-            'Authorization': 'Bearer ' + self.v2_api_token
-        })
+        try:
+            r = requests.get(self._get_endpoint(server_id) + '/credentials', headers={
+                'Authorization': 'Bearer ' + self.v2_api_token
+            })
+        except requests.exceptions.RequestException as re:
+            self.module.fail_json(
+                msg='Unable to retrieve the credentials for server : {0}. {1}'.format(server_id, re.message)
+            )
 
         if r.status_code not in [200]:
             self.module.fail_json(
@@ -350,6 +370,6 @@ def main():
     clc_server_fact = ClcServerFact(module)
     clc_server_fact.process_request()
 
-from ansible.module_utils.basic import *  # pylint: disable=W0614
+from ansible.module_utils.basic import *
 if __name__ == '__main__':
     main()
