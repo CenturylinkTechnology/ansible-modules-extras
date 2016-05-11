@@ -24,7 +24,7 @@ module: clc_server_fact
 short_description: Get facts about servers in CenturyLink Cloud.
 description:
   - An Ansible module to retrieve facts about servers in CenturyLink Cloud.
-version_added: "2.3"
+version_added: "2.2"
 options:
   server_id:
     description:

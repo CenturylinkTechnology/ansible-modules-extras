@@ -24,7 +24,7 @@ module: clc_group_fact
 short_description: Get facts about groups in CenturyLink Cloud.
 description:
   - An Ansible module to retrieve facts about groups in CenturyLink Cloud.
-version_added: "2.3"
+version_added: "2.2"
 options:
   group_id:
     description:
