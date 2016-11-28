@@ -27,6 +27,8 @@ author:
     - "Indrajit Raychaudhuri (@indrajitr)"
     - "Daniel Jaouen (@danieljaouen)"
     - "Andrew Dunham (@andrew-d)"
+requirements:
+   - "python >= 2.6"
 short_description: Package manager for Homebrew
 description:
     - Manages Homebrew packages
@@ -37,6 +39,12 @@ options:
             - name of package to install/remove
         required: false
         default: None
+        aliases: ['pkg', 'package', 'formula']
+    path:
+        description:
+            - "':' separated list of paths to search for 'brew' executable. Since A package (I(formula) in homebrew parlance) location is prefixed relative to the actual path of I(brew) command, providing an alternative I(brew) path enables managing different set of packages in an alternative location in the system."
+        required: false
+        default: '/usr/local/bin'
     state:
         description:
             - state of the package
@@ -49,25 +57,40 @@ options:
         required: false
         default: no
         choices: [ "yes", "no" ]
+        aliases: ['update-brew']
     upgrade_all:
         description:
             - upgrade all homebrew packages
         required: false
         default: no
         choices: [ "yes", "no" ]
+        aliases: ['upgrade']
     install_options:
         description:
             - options flags to install a package
         required: false
         default: null
+        aliases: ['options']
         version_added: "1.4"
 notes:  []
 '''
 EXAMPLES = '''
+# Install formula foo with 'brew' in default path (C(/usr/local/bin))
 - homebrew: name=foo state=present
+
+# Install formula foo with 'brew' in alternate path C(/my/other/location/bin)
+- homebrew: name=foo path=/my/other/location/bin state=present
+
+# Update homebrew first and install formula foo with 'brew' in default path
 - homebrew: name=foo state=present update_homebrew=yes
+
+# Update homebrew first and upgrade formula foo to latest available with 'brew' in default path
 - homebrew: name=foo state=latest update_homebrew=yes
+
+# Update homebrew and upgrade all packages
 - homebrew: update_homebrew=yes upgrade_all=yes
+
+# Miscellaneous other examples
 - homebrew: name=foo state=head
 - homebrew: name=foo state=linked
 - homebrew: name=foo state=absent
@@ -77,6 +100,8 @@ EXAMPLES = '''
 
 import os.path
 import re
+
+from ansible.module_utils.six import iteritems
 
 
 # exceptions -------------------------------------------------------------- {{{
@@ -303,7 +328,7 @@ class Homebrew(object):
             return package
     # /class properties -------------------------------------------- }}}
 
-    def __init__(self, module, path=None, packages=None, state=None,
+    def __init__(self, module, path, packages=None, state=None,
                  update_homebrew=False, upgrade_all=False,
                  install_options=None):
         if not install_options:
@@ -325,16 +350,11 @@ class Homebrew(object):
         self.message = ''
 
     def _setup_instance_vars(self, **kwargs):
-        for key, val in kwargs.iteritems():
+        for key, val in iteritems(kwargs):
             setattr(self, key, val)
 
     def _prep(self):
-        self._prep_path()
         self._prep_brew_path()
-
-    def _prep_path(self):
-        if not self.path:
-            self.path = ['/usr/local/bin']
 
     def _prep_brew_path(self):
         if not self.module:
@@ -770,7 +790,11 @@ def main():
                 required=False,
                 type='list',
             ),
-            path=dict(required=False),
+            path=dict(
+                default="/usr/local/bin",
+                required=False,
+                type='path',
+            ),
             state=dict(
                 default="present",
                 choices=[
@@ -798,6 +822,9 @@ def main():
         ),
         supports_check_mode=True,
     )
+
+    module.run_command_environ_update = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C', LC_CTYPE='C')
+
     p = module.params
 
     if p['name']:
@@ -808,8 +835,6 @@ def main():
     path = p['path']
     if path:
         path = path.split(':')
-    else:
-        path = ['/usr/local/bin']
 
     state = p['state']
     if state in ('present', 'installed'):

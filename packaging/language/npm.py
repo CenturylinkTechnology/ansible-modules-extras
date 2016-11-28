@@ -107,7 +107,12 @@ import os
 try:
     import json
 except ImportError:
-    import simplejson as json
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
+
 
 class Npm(object):
     def __init__(self, module, **kwargs):
@@ -126,7 +131,7 @@ class Npm(object):
             self.executable = [module.get_bin_path('npm', True)]
 
         if kwargs['version']:
-            self.name_version = self.name + '@' + self.version
+            self.name_version = self.name + '@' + str(self.version)
         else:
             self.name_version = self.name
 
@@ -149,7 +154,6 @@ class Npm(object):
             #If path is specified, cd into that path and run the command.
             cwd = None
             if self.path:
-                self.path = os.path.abspath(os.path.expanduser(self.path))
                 if not os.path.exists(self.path):
                     os.makedirs(self.path)
                 if not os.path.isdir(self.path):
@@ -207,10 +211,10 @@ class Npm(object):
 def main():
     arg_spec = dict(
         name=dict(default=None),
-        path=dict(default=None),
+        path=dict(default=None, type='path'),
         version=dict(default=None),
         production=dict(default='no', type='bool'),
-        executable=dict(default=None),
+        executable=dict(default=None, type='path'),
         registry=dict(default=None),
         state=dict(default='present', choices=['present', 'absent', 'latest']),
         ignore_scripts=dict(default=False, type='bool'),
@@ -248,9 +252,12 @@ def main():
     elif state == 'latest':
         installed, missing = npm.list()
         outdated = npm.list_outdated()
-        if len(missing) or len(outdated):
+        if len(missing):
             changed = True
             npm.install()
+        if len(outdated):
+            changed = True
+            npm.update()
     else: #absent
         installed, missing = npm.list()
         if name in installed:

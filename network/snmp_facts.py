@@ -21,7 +21,7 @@ DOCUMENTATION = '''
 module: snmp_facts
 version_added: "1.9"
 author: "Patrick Ogenstad (@ogenstad)"
-short_description: Retrive facts for a device using SNMP.
+short_description: Retrieve facts for a device using SNMP.
 description:
     - Retrieve facts for a device using SNMP, the facts will be
       inserted to the ansible_facts key.
@@ -153,7 +153,7 @@ def lookup_adminstatus(int_adminstatus):
                             2: 'down',
                             3: 'testing'
                           }
-    if int_adminstatus in adminstatus_options.keys():
+    if int_adminstatus in adminstatus_options:
         return adminstatus_options[int_adminstatus]
     else:
         return ""
@@ -168,7 +168,7 @@ def lookup_operstatus(int_operstatus):
                            6: 'notPresent',
                            7: 'lowerLayerDown'
                          }
-    if int_operstatus in operstatus_options.keys():
+    if int_operstatus in operstatus_options:
         return operstatus_options[int_operstatus]
     else:
         return ""

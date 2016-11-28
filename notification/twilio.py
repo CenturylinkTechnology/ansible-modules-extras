@@ -139,7 +139,7 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             account_sid=dict(required=True),
-            auth_token=dict(required=True),
+            auth_token=dict(required=True, no_log=True),
             msg=dict(required=True),
             from_number=dict(required=True),
             to_number=dict(required=True),
@@ -161,8 +161,12 @@ def main():
     for number in to_number:
         r, info = post_twilio_api(module, account_sid, auth_token, msg,
                 from_number, number, media_url)
-        if info['status'] != 200:
-            module.fail_json(msg="unable to send message to %s" % number)
+        if info['status'] not in [200, 201]:
+            body_message = "unknown error"
+            if 'body' in info:
+                body = json.loads(info['body'])
+                body_message = body['message']
+            module.fail_json(msg="unable to send message to %s: %s" % (number, body_message))
 
     module.exit_json(msg=msg, changed=False)
 

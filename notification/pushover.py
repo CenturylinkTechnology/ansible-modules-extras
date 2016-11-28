@@ -24,7 +24,7 @@ DOCUMENTATION = '''
 ---
 module: pushover
 version_added: "2.0"
-short_description: Send notifications via u(https://pushover.net)
+short_description: Send notifications via U(https://pushover.net)
 description:
    - Send notifications via pushover, to subscriber list of devices, and email
      addresses. Requires pushover app on devices.
@@ -34,18 +34,19 @@ notes:
 options:
   msg:
     description:
-      What message you wish to send.
+      - What message you wish to send.
     required: true
   app_token:
     description:
-      Pushover issued token identifying your pushover app.
+      - Pushover issued token identifying your pushover app.
     required: true
   user_key:
     description:
-      Pushover issued authentication key for your user.
+      - Pushover issued authentication key for your user.
     required: true
   pri:
-    description: Message priority (see u(https://pushover.net) for details.)
+    description:
+      - Message priority (see U(https://pushover.net) for details.)
     required: false
 
 author: "Jim Richardson (@weaselkeeper)"
@@ -94,9 +95,9 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             msg=dict(required=True),
-            app_token=dict(required=True),
-            user_key=dict(required=True),
-            pri=dict(required=False, default=0),
+            app_token=dict(required=True, no_log=True),
+            user_key=dict(required=True, no_log=True),
+            pri=dict(required=False, default='0', choices=['-2','-1','0','1','2']),
         ),
     )
 

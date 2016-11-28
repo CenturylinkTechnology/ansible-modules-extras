@@ -28,7 +28,7 @@ version_added: "2.0"
 short_description: This module manages rabbitMQ exchanges
 description:
   - This module uses rabbitMQ Rest API to create/delete exchanges
-requirements: [ python requests ]
+requirements: [ "requests >= 1.0.0" ]
 options:
     name:
         description:
@@ -120,9 +120,9 @@ def main():
             login_host = dict(default='localhost', type='str'),
             login_port = dict(default='15672', type='str'),
             vhost = dict(default='/', type='str'),
-            durable = dict(default=True, choices=BOOLEANS, type='bool'),
-            auto_delete = dict(default=False, choices=BOOLEANS, type='bool'),
-            internal = dict(default=False, choices=BOOLEANS, type='bool'),
+            durable = dict(default=True, type='bool'),
+            auto_delete = dict(default=False, type='bool'),
+            internal = dict(default=False, type='bool'),
             exchange_type = dict(default='direct', aliases=['type'], type='str'),
             arguments = dict(default=dict(), type='dict')
         ),
@@ -133,9 +133,9 @@ def main():
         module.params['login_host'],
         module.params['login_port'],
         urllib.quote(module.params['vhost'],''),
-        module.params['name']
+        urllib.quote(module.params['name'],'')
     )
-    
+
     # Check if exchange already exists
     r = requests.get( url, auth=(module.params['login_user'],module.params['login_password']))
 

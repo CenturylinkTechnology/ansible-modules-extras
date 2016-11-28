@@ -22,7 +22,7 @@ DOCUMENTATION = '''
 ---
 module: svc
 author: "Brian Coca (@bcoca)"
-version_added:
+version_added: "1.9"
 short_description:  Manage daemontools services.
 description:
     - Controls daemontools services on remote hosts using the svc utility.
@@ -38,7 +38,7 @@ options:
             - C(Started)/C(stopped) are idempotent actions that will not run
               commands unless necessary.  C(restarted) will always bounce the
               svc (svc -t) and C(killed) will always bounce the svc (svc -k).
-              C(reloaded) will send a sigusr1 (svc -u).
+              C(reloaded) will send a sigusr1 (svc -1).
               C(once) will run a normally downed svc once (svc -o), not really
               an idempotent operation.
     downed:
@@ -87,6 +87,8 @@ EXAMPLES = '''
 
 import platform
 import shlex
+from ansible.module_utils.pycompat24 import get_exception
+from ansible.module_utils.basic import *
 
 def _load_dist_subclass(cls, *args, **kwargs):
     '''
@@ -152,7 +154,8 @@ class Svc(object):
         if os.path.exists(self.src_full):
             try:
                 os.symlink(self.src_full, self.svc_full)
-            except OSError, e:
+            except OSError:
+                e = get_exception()
                 self.module.fail_json(path=self.src_full, msg='Error while linking: %s' % str(e))
         else:
             self.module.fail_json(msg="Could not find source for service to enable (%s)." % self.src_full)
@@ -160,7 +163,8 @@ class Svc(object):
     def disable(self):
         try:
             os.unlink(self.svc_full)
-        except OSError, e:
+        except OSError:
+            e = get_exception()
             self.module.fail_json(path=self.svc_full, msg='Error while unlinking: %s' % str(e))
         self.execute_command([self.svc_cmd,'-dx',self.src_full])
 
@@ -221,7 +225,8 @@ class Svc(object):
     def execute_command(self, cmd):
         try:
             (rc, out, err) = self.module.run_command(' '.join(cmd))
-        except Exception, e:
+        except Exception:
+            e = get_exception()
             self.module.fail_json(msg="failed to execute: %s" % str(e))
         return (rc, out, err)
 
@@ -240,14 +245,16 @@ def main():
         argument_spec = dict(
             name = dict(required=True),
             state = dict(choices=['started', 'stopped', 'restarted', 'killed', 'reloaded', 'once']),
-            enabled = dict(required=False, type='bool', choices=BOOLEANS),
-            downed = dict(required=False, type='bool', choices=BOOLEANS),
+            enabled = dict(required=False, type='bool'),
+            downed = dict(required=False, type='bool'),
             dist = dict(required=False, default='daemontools'),
             service_dir = dict(required=False, default='/service'),
             service_src = dict(required=False, default='/etc/service'),
         ),
         supports_check_mode=True,
     )
+
+    module.run_command_environ_update = dict(LANG='C', LC_ALL='C', LC_MESSAGES='C', LC_CTYPE='C')
 
     state = module.params['state']
     enabled = module.params['enabled']
@@ -265,7 +272,8 @@ def main():
                     svc.enable()
                 else:
                     svc.disable()
-            except (OSError, IOError), e:
+            except (OSError, IOError):
+                e = get_exception()
                 module.fail_json(msg="Could change service link: %s" % str(e))
 
     if state is not None and state != svc.state:
@@ -282,13 +290,13 @@ def main():
                     open(d_file, "a").close()
                 else:
                     os.unlink(d_file)
-            except (OSError, IOError), e:
+            except (OSError, IOError):
+                e = get_exception()
                 module.fail_json(msg="Could change downed file: %s " % (str(e)))
 
     module.exit_json(changed=changed, svc=svc.report())
 
 
-# this is magic,  not normal python include
-from ansible.module_utils.basic import *
+
 
 main()

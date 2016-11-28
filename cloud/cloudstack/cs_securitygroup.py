@@ -42,6 +42,16 @@ options:
     required: false
     default: 'present'
     choices: [ 'present', 'absent' ]
+  domain:
+    description:
+      - Domain the security group is related to.
+    required: false
+    default: null
+  account:
+    description:
+      - Account the security group is related to.
+    required: false
+    default: null
   project:
     description:
       - Name of the project the security group to be created in.
@@ -81,13 +91,27 @@ description:
   returned: success
   type: string
   sample: application security group
+tags:
+  description: List of resource tags associated with the security group.
+  returned: success
+  type: dict
+  sample: '[ { "key": "foo", "value": "bar" } ]'
+project:
+  description: Name of project the security group is related to.
+  returned: success
+  type: string
+  sample: Production
+domain:
+  description: Domain the security group is related to.
+  returned: success
+  type: string
+  sample: example domain
+account:
+  description: Account the security group is related to.
+  returned: success
+  type: string
+  sample: example account
 '''
-
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
 
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
@@ -102,15 +126,16 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
     def get_security_group(self):
         if not self.security_group:
-            sg_name = self.module.params.get('name')
+
             args = {}
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
+            args['securitygroupname'] = self.module.params.get('name')
+
             sgs = self.cs.listSecurityGroups(**args)
             if sgs:
-                for s in sgs['securitygroup']:
-                    if s['name'] == sg_name:
-                        self.security_group = s
-                        break
+                self.security_group = sgs['securitygroup'][0]
         return self.security_group
 
 
@@ -121,7 +146,9 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
             args = {}
             args['name'] = self.module.params.get('name')
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
             args['description'] = self.module.params.get('description')
 
             if not self.module.check_mode:
@@ -140,7 +167,9 @@ class AnsibleCloudStackSecurityGroup(AnsibleCloudStack):
 
             args = {}
             args['name'] = self.module.params.get('name')
-            args['projectid'] = self.get_project('id')
+            args['projectid'] = self.get_project(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
 
             if not self.module.check_mode:
                 res = self.cs.deleteSecurityGroup(**args)
@@ -158,6 +187,8 @@ def main():
         description = dict(default=None),
         state = dict(choices=['present', 'absent'], default='present'),
         project = dict(default=None),
+        account = dict(default=None),
+        domain = dict(default=None),
     ))
 
     module = AnsibleModule(
@@ -165,9 +196,6 @@ def main():
         required_together=cs_required_together(),
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_sg = AnsibleCloudStackSecurityGroup(module)
@@ -180,7 +208,7 @@ def main():
 
         result = acs_sg.get_result(sg)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

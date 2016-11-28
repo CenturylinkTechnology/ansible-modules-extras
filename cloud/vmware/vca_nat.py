@@ -27,63 +27,6 @@ description:
 version_added: "2.0"
 author: Peter Sprygada (@privateip)
 options:
-    username:
-      description:
-        - The vca username or email address, if not set the environment variable VCA_USER is checked for the username.
-      required: false
-      default: None
-    password:
-      description:
-        - The vca password, if not set the environment variable VCA_PASS is checked for the password
-      required: false
-      default: None
-    org:
-      description:
-        - The org to login to for creating vapp, mostly set when the service_type is vdc.
-      required: false
-      default: None
-    instance_id:
-      description:
-        - The instance id in a vchs environment to be used for creating the vapp
-      required: false
-      default: None
-    host:
-      description:
-        - The authentication host to be used when service type  is vcd.
-      required: false
-      default: None
-    api_version:
-      description:
-        - The api version to be used with the vca
-      required: false
-      default: "5.7"
-    service_type:
-      description:
-        - The type of service we are authenticating against
-      required: false
-      default: vca
-      choices: [ "vca", "vchs", "vcd" ]
-    state:
-      description:
-        - if the object should be added or removed
-      required: false
-      default: present
-      choices: [ "present", "absent" ]
-    verify_certs:
-      description:
-        - If the certificates of the authentication is to be verified
-      required: false
-      default: True
-    vdc_name:
-      description:
-        - The name of the vdc where the gateway is located.
-      required: false
-      default: None
-    gateway_name:
-      description:
-        - The name of the gateway of the vdc where the rule should be added
-      required: false
-      default: gateway
     purge_rules:
       description:
         - If set to true, it will delete all rules in the gateway that are not given as paramter to this module.
@@ -94,6 +37,7 @@ options:
         - A list of rules to be added to the gateway, Please see examples on valid entries
       required: True
       default: false
+extends_documentation_fragment: vca.documentation
 '''
 
 EXAMPLES = '''
@@ -109,8 +53,8 @@ EXAMPLES = '''
        state: 'present'
        nat_rules:
          - rule_type: SNAT
-           original_ip: 192.168.2.10
-           translated_ip: 107.189.95.208
+           original_ip: 192.0.2.42
+           translated_ip: 203.0.113.23
 
 #example for a DNAT
 - hosts: localhost
@@ -122,15 +66,14 @@ EXAMPLES = '''
        state: 'present'
        nat_rules:
          - rule_type: DNAT
-           original_ip: 107.189.95.208
+           original_ip: 203.0.113.23
            original_port: 22
-           translated_ip: 192.168.2.10
+           translated_ip: 192.0.2.42
            translated_port: 22
 
 '''
 
 import time
-import json
 import xmltodict
 
 VALID_RULE_KEYS = ['rule_type', 'original_ip', 'original_port',
@@ -211,7 +154,7 @@ def main():
 
     try:
         desired_rules = validate_nat_rules(nat_rules)
-    except VcaError, e:
+    except VcaError as e:
         module.fail_json(msg=e.message)
 
     rules = gateway.get_nat_rules()

@@ -57,6 +57,11 @@ EXAMPLES = '''
 - modprobe: name=dummy state=present params="numdummies=2"
 '''
 
+from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
+import shlex
+
+
 def main():
     module = AnsibleModule(
         argument_spec={
@@ -84,7 +89,8 @@ def main():
                 present = True
                 break
         modules.close()
-    except IOError, e:
+    except IOError:
+        e = get_exception()
         module.fail_json(msg=str(e), **args)
 
     # Check only; don't modify
@@ -100,19 +106,19 @@ def main():
     # Add/remove module as needed
     if args['state'] == 'present':
         if not present:
-            rc, _, err = module.run_command([module.get_bin_path('modprobe', True), args['name'], args['params']])
+            command = [module.get_bin_path('modprobe', True), args['name']]
+            command.extend(shlex.split(args['params']))
+            rc, _, err = module.run_command(command)
             if rc != 0:
                 module.fail_json(msg=err, **args)
             args['changed'] = True
     elif args['state'] == 'absent':
         if present:
-            rc, _, err = module.run_command([module.get_bin_path('rmmod', True), args['name']])
+            rc, _, err = module.run_command([module.get_bin_path('modprobe', True), '-r', args['name']])
             if rc != 0:
                 module.fail_json(msg=err, **args)
             args['changed'] = True
 
     module.exit_json(**args)
 
-# import module snippets
-from ansible.module_utils.basic import *
 main()

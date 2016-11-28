@@ -46,11 +46,6 @@ options:
     required: false
     choices: [ 'source', 'roundrobin', 'leastconn' ]
     default: 'source'
-  protocol:
-    description:
-      - Protocol for the load balancer rule.
-    required: false
-    default: null
   private_port:
     description:
       - The private port of the private ip address/virtual machine where the network traffic will be load balanced to.
@@ -222,12 +217,6 @@ state:
   sample: "Add"
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -338,7 +327,7 @@ class AnsibleCloudStackLBRule(AnsibleCloudStack):
                 self.module.fail_json(msg="Failed: '%s'" % res['errortext'])
             poll_async = self.module.params.get('poll_async')
             if poll_async:
-                res = self._poll_job(res, 'loadbalancer')
+                res = self.poll_job(res, 'loadbalancer')
         return rule
 
 
@@ -355,12 +344,12 @@ def main():
         ip_address = dict(required=True, aliases=['public_ip']),
         cidr = dict(default=None),
         project = dict(default=None),
-        open_firewall = dict(choices=BOOLEANS, default=False),
+        open_firewall = dict(type='bool', default=False),
         tags = dict(type='list', aliases=['tag'], default=None),
         zone = dict(default=None),
         domain = dict(default=None),
         account = dict(default=None),
-        poll_async = dict(choices=BOOLEANS, default=True),
+        poll_async = dict(type='bool', default=True),
     ))
 
     module = AnsibleModule(
@@ -368,9 +357,6 @@ def main():
         required_together=cs_required_together(),
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_lb_rule = AnsibleCloudStackLBRule(module)
@@ -383,7 +369,7 @@ def main():
 
         result = acs_lb_rule.get_result(rule)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

@@ -3,7 +3,8 @@
 
 """
 Ansible module to manage A10 Networks slb service-group objects
-(c) 2014, Mischa Peters <mpeters@a10networks.com>
+(c) 2014, Mischa Peters <mpeters@a10networks.com>,
+Eric Chou <ericc@a10networks.com>
 
 This file is part of Ansible
 
@@ -25,52 +26,31 @@ DOCUMENTATION = '''
 ---
 module: a10_service_group
 version_added: 1.8
-short_description: Manage A10 Networks devices' service groups
+short_description: Manage A10 Networks AX/SoftAX/Thunder/vThunder devices' service groups.
 description:
-    - Manage slb service-group objects on A10 Networks devices via aXAPI
-author: "Mischa Peters (@mischapeters)"
+    - Manage SLB (Server Load Balancing) service-group objects on A10 Networks devices via aXAPIv2.
+author: "Eric Chou (@ericchou) 2016, Mischa Peters (@mischapeters) 2014"
 notes:
-    - Requires A10 Networks aXAPI 2.1
-    - When a server doesn't exist and is added to the service-group the server will be created
+    - Requires A10 Networks aXAPI 2.1.
+    - When a server doesn't exist and is added to the service-group the server will be created.
+extends_documentation_fragment: a10
 options:
-  host:
-    description:
-      - hostname or ip of your A10 Networks device
-    required: true
-    default: null
-    aliases: []
-    choices: []
-  username:
-    description:
-      - admin account of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['user', 'admin']
-    choices: []
-  password:
-    description:
-      - admin password of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['pass', 'pwd']
-    choices: []
   service_group:
     description:
-      - slb service-group name
+      - The SLB (Server Load Balancing) service-group name
     required: true
     default: null
     aliases: ['service', 'pool', 'group']
-    choices: []
   service_group_protocol:
     description:
-      - slb service-group protocol
+      - The SLB service-group protocol of TCP or UDP.
     required: false
     default: tcp
     aliases: ['proto', 'protocol']
     choices: ['tcp', 'udp']
   service_group_method:
     description:
-      - slb service-group loadbalancing method
+      - The SLB service-group load balancing method, such as round-robin or weighted-rr.
     required: false
     default: round-robin
     aliases: ['method']
@@ -82,17 +62,6 @@ options:
         specify the C(status:). See the examples below for details.
     required: false
     default: null
-    aliases: []
-    choices: []
-  write_config:
-    description:
-      - If C(yes), any changes will cause a write of the running configuration
-        to non-volatile memory. This will save I(all) configuration changes,
-        including those that may have been made manually or through other modules,
-        so care should be taken when specifying C(yes).
-    required: false
-    default: "no"
-    choices: ["yes", "no"]
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used
@@ -101,6 +70,10 @@ options:
     default: 'yes'
     choices: ['yes', 'no']
 
+'''
+
+RETURN = '''
+#
 '''
 
 EXAMPLES = '''
@@ -334,8 +307,11 @@ def main():
     module.exit_json(changed=changed, content=result)
 
 # standard ansible module imports
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
-from ansible.module_utils.a10 import *
+import json
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.urls import url_argument_spec
+from ansible.module_utils.a10 import axapi_call, a10_argument_spec, axapi_authenticate, axapi_failure, axapi_enabled_disabled
 
-main()
+
+if __name__ == '__main__':
+    main()

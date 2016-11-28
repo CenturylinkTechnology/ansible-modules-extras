@@ -27,6 +27,8 @@ DOCUMENTATION = '''
 ---
 module: pam_limits
 version_added: "2.0"
+authors:
+    - "Sebastien Rohaut (@usawa)"
 short_description: Modify Linux PAM limits
 description:
      - The M(pam_limits) module modify PAM limits, default in /etc/security/limits.conf.
@@ -40,7 +42,7 @@ options:
     description:
       - Limit type, see C(man limits) for an explanation
     required: true
-    choices: [ "hard", "soft" ]
+    choices: [ "hard", "soft", "-" ]
   limit_item:
     description:
       - The limit to be set
@@ -78,14 +80,22 @@ options:
       - Modify the limits.conf path.
     required: false
     default: "/etc/security/limits.conf"
+  comment:
+    description:
+      - Comment associated with the limit.
+    required: false
+    default: ''
 '''
 
 EXAMPLES = '''
-# Add or modify limits for the user joe
+# Add or modify nofile soft limit for the user joe
 - pam_limits: domain=joe limit_type=soft limit_item=nofile value=64000
 
-# Add or modify limits for the user joe. Keep or set the maximal value
-- pam_limits: domain=joe limit_type=soft limit_item=nofile value=1000000
+# Add or modify fsize hard limit for the user smith. Keep or set the maximal value.
+- pam_limits: domain=smith limit_type=hard limit_item=fsize value=1000000 use_max=yes
+
+# Add or modify memlock, both soft and hard, limit for the user james with a comment.
+- pam_limits: domain=james limit_type=- limit_item=memlock value=unlimited comment="unlimited memory lock for james"
 '''
 
 def main():
@@ -102,7 +112,7 @@ def main():
             domain            = dict(required=True, type='str'),
             limit_type        = dict(required=True, type='str', choices=pam_types),
             limit_item        = dict(required=True, type='str', choices=pam_items),
-            value             = dict(required=True, type='int'),
+            value             = dict(required=True, type='str'),
             use_max           = dict(default=False, type='bool'),
             use_min           = dict(default=False, type='bool'),
             backup            = dict(default=False, type='bool'),
@@ -132,6 +142,9 @@ def main():
     if use_max and use_min:
         module.fail_json(msg="Cannot use use_min and use_max at the same time." )
 
+    if not (value in ['unlimited', 'infinity', '-1'] or value.isdigit()):
+        module.fail_json(msg="Argument 'value' can be one of 'unlimited', 'infinity', '-1' or positive number. Refer to manual pages for more details.")
+
     # Backup
     if backup:
         backup_file = module.backup_local(limits_conf)
@@ -141,7 +154,7 @@ def main():
     message = ''
     f = open (limits_conf, 'r')
     # Tempfile
-    nf = tempfile.NamedTemporaryFile(delete = False)
+    nf = tempfile.NamedTemporaryFile()
 
     found = False
     new_value = value
@@ -181,7 +194,10 @@ def main():
         line_domain     = line_fields[0]
         line_type       = line_fields[1]
         line_item       = line_fields[2]
-        actual_value    = int(line_fields[3])
+        actual_value    = line_fields[3]
+
+        if not (actual_value in ['unlimited', 'infinity', '-1'] or actual_value.isdigit()):
+            module.fail_json(msg="Invalid configuration of '%s'. Current value of %s is unsupported." % (limits_conf, line_item))
 
         # Found the line
         if line_domain == domain and line_type == limit_type and line_item == limit_item:
@@ -191,16 +207,29 @@ def main():
                 nf.write(line)
                 continue
 
+            actual_value_unlimited = actual_value in ['unlimited', 'infinity', '-1']
+            value_unlimited = value in ['unlimited', 'infinity', '-1']
+
             if use_max:
-                new_value = max(value, actual_value)
+                if value.isdigit() and actual_value.isdigit():
+                    new_value = str(max(int(value), int(actual_value)))
+                elif actual_value_unlimited:
+                    new_value = actual_value
+                else:
+                    new_value = value
 
             if use_min:
-                new_value = min(value,actual_value)
+                if value.isdigit() and actual_value.isdigit():
+                    new_value = str(min(int(value), int(actual_value)))
+                elif value_unlimited:
+                    new_value = actual_value
+                else:
+                    new_value = value
 
             # Change line only if value has changed
             if new_value != actual_value:
                 changed = True
-                new_limit = domain + "\t" + limit_type + "\t" + limit_item + "\t" + str(new_value) + new_comment + "\n"
+                new_limit = domain + "\t" + limit_type + "\t" + limit_item + "\t" + new_value + new_comment + "\n"
                 message = new_limit
                 nf.write(new_limit)
             else:
@@ -211,16 +240,21 @@ def main():
 
     if not found:
         changed = True
-        new_limit = domain + "\t" + limit_type + "\t" + limit_item + "\t" + str(new_value) + new_comment + "\n"
+        new_limit = domain + "\t" + limit_type + "\t" + limit_item + "\t" + new_value + new_comment + "\n"
         message = new_limit
         nf.write(new_limit)
 
     f.close()
-    nf.close()
+    nf.flush()
 
     # Copy tempfile to newfile
     module.atomic_move(nf.name, f.name)
 
+    try:
+        nf.close()
+    except:
+        pass
+   
     res_args = dict(
         changed = changed, msg = message
     )

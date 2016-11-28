@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 # This file is part of Ansible
 #
 # Ansible is free software: you can redistribute it and/or modify
@@ -40,6 +41,18 @@ options:
       - An optional human-readable string describing the contents and purpose of the new AMI.
     required: false
     default: null
+  encrypted:
+    description:
+      - Whether or not to encrypt the target image
+    required: false
+    default: null
+    version_added: "2.2"
+  kms_key_id:
+    description:
+      - KMS key id used to encrypt image. If not specified, uses default EBS Customer Master Key (CMK) for your account.
+    required: false
+    default: null
+    version_added: "2.2"
   wait:
     description:
       - wait for the copied AMI to be in state 'available' before returning.
@@ -65,32 +78,64 @@ extends_documentation_fragment:
 
 EXAMPLES = '''
 # Basic AMI Copy
-- local_action:
-    module: ec2_ami_copy
-    source_region: eu-west-1
-    dest_region: us-east-1
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
     source_image_id: ami-xxxxxxx
-    name: SuperService-new-AMI
-    description: latest patch
-    tags: '{"Name":"SuperService-new-AMI", "type":"SuperService"}'
+
+# AMI copy wait until available
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
+    source_image_id: ami-xxxxxxx
     wait: yes
   register: image_id
+
+# Named AMI copy
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
+    source_image_id: ami-xxxxxxx
+    name: My-Awesome-AMI
+    description: latest patch
+
+# Tagged AMI copy
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
+    source_image_id: ami-xxxxxxx
+    tags:
+        Name: My-Super-AMI
+        Patch: 1.2.3
+
+# Encrypted AMI copy
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
+    source_image_id: ami-xxxxxxx
+    encrypted: yes
+
+# Encrypted AMI copy with specified key
+- ec2_ami_copy:
+    source_region: us-east-1
+    region: eu-west-1
+    source_image_id: ami-xxxxxxx
+    encrypted: yes
+    kms_key_id: arn:aws:kms:us-east-1:XXXXXXXXXXXX:key/746de6ea-50a4-4bcb-8fbc-e3b29f2d367b
 '''
 
-
-import sys
 import time
 
 try:
     import boto
     import boto.ec2
-    from boto.vpc import VPCConnection
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
-    
-if not HAS_BOTO:
-    module.fail_json(msg='boto required for this module')
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import ec2_argument_spec, ec2_connect, get_aws_connection_info
+
 
 def copy_image(module, ec2):
     """
@@ -104,6 +149,8 @@ def copy_image(module, ec2):
     source_image_id = module.params.get('source_image_id')
     name = module.params.get('name')
     description = module.params.get('description')
+    encrypted = module.params.get('encrypted')
+    kms_key_id = module.params.get('kms_key_id')
     tags = module.params.get('tags')
     wait_timeout = int(module.params.get('wait_timeout'))
     wait = module.params.get('wait')
@@ -112,11 +159,13 @@ def copy_image(module, ec2):
         params = {'source_region': source_region,
                   'source_image_id': source_image_id,
                   'name': name,
-                  'description': description
+                  'description': description,
+                  'encrypted': encrypted,
+                  'kms_key_id': kms_key_id
         }
 
         image_id = ec2.copy_image(**params).image_id
-    except boto.exception.BotoServerError, e:
+    except boto.exception.BotoServerError as e:
         module.fail_json(msg="%s: %s" % (e.error_code, e.error_message))
 
     img = wait_until_image_is_recognized(module, ec2, wait_timeout, image_id, wait)
@@ -128,7 +177,7 @@ def copy_image(module, ec2):
     module.exit_json(msg="AMI copy operation complete", image_id=image_id, state=img.state, changed=True)
 
 
-# register tags to the copied AMI in dest_region
+# register tags to the copied AMI
 def register_tags_if_any(module, ec2, tags, image_id):
     if tags:
         try:
@@ -154,7 +203,7 @@ def wait_until_image_is_recognized(module, ec2, wait_timeout, image_id, wait):
     for i in range(wait_timeout):
         try:
             return ec2.get_image(image_id)
-        except boto.exception.EC2ResponseError, e:
+        except boto.exception.EC2ResponseError as e:
             # This exception we expect initially right after registering the copy with EC2 API
             if 'InvalidAMIID.NotFound' in e.error_code and wait:
                 time.sleep(1)
@@ -174,32 +223,33 @@ def main():
         source_image_id=dict(required=True),
         name=dict(),
         description=dict(default=""),
+        encrypted=dict(type='bool', required=False),
+        kms_key_id=dict(type='str', required=False),
         wait=dict(type='bool', default=False),
         wait_timeout=dict(default=1200),
         tags=dict(type='dict')))
 
     module = AnsibleModule(argument_spec=argument_spec)
 
+    if not HAS_BOTO:
+        module.fail_json(msg='boto required for this module')
+
     try:
         ec2 = ec2_connect(module)
-    except boto.exception.NoAuthHandlerFound, e:
+    except boto.exception.NoAuthHandlerFound as e:
         module.fail_json(msg=str(e))
 
     try:
         region, ec2_url, boto_params = get_aws_connection_info(module)
-        vpc = connect_to_aws(boto.vpc, region, **boto_params)
-    except boto.exception.NoAuthHandlerFound, e:
-        module.fail_json(msg = str(e))
+    except boto.exception.NoAuthHandlerFound as e:
+        module.fail_json(msg=str(e))
 
-    if not region:        
+    if not region:
         module.fail_json(msg="region must be specified")
 
     copy_image(module, ec2)
 
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
-
-main()
+if __name__ == '__main__':
+    main()
 

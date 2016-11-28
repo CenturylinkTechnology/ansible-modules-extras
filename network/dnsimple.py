@@ -159,7 +159,7 @@ def main():
     )
 
     if not HAS_DNSIMPLE:
-        module.fail_json("dnsimple required for this module")
+        module.fail_json(msg="dnsimple required for this module")
 
     account_email     = module.params.get('account_email')
     account_api_token = module.params.get('account_api_token')
@@ -294,12 +294,14 @@ def main():
             else:
                 module.fail_json(msg="'%s' is an unknown value for the state argument" % state)
 
-    except DNSimpleException, e:
+    except DNSimpleException:
+        e = get_exception()
         module.fail_json(msg="Unable to contact DNSimple: %s" % e.message)
 
     module.fail_json(msg="Unknown what you wanted me to do")
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 
 main()

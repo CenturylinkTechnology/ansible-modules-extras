@@ -197,12 +197,6 @@ project:
   sample: example project
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -306,10 +300,10 @@ def main():
         account = dict(default=None),
         project = dict(default=None),
         checksum = dict(default=None),
-        is_ready = dict(choices=BOOLEANS, default=False),
-        bootable = dict(choices=BOOLEANS, default=True),
-        is_featured = dict(choices=BOOLEANS, default=False),
-        is_dynamically_scalable = dict(choices=BOOLEANS, default=False),
+        is_ready = dict(type='bool', default=False),
+        bootable = dict(type='bool', default=True),
+        is_featured = dict(type='bool', default=False),
+        is_dynamically_scalable = dict(type='bool', default=False),
         state = dict(choices=['present', 'absent'], default='present'),
     ))
 
@@ -318,9 +312,6 @@ def main():
         required_together=cs_required_together(),
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_iso = AnsibleCloudStackIso(module)
@@ -333,7 +324,7 @@ def main():
 
         result = acs_iso.get_result(iso)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

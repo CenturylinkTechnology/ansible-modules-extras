@@ -3,7 +3,8 @@
 
 """
 Ansible module to manage A10 Networks slb server objects
-(c) 2014, Mischa Peters <mpeters@a10networks.com>
+(c) 2014, Mischa Peters <mpeters@a10networks.com>,
+2016, Eric Chou <ericc@a10networks.com>
 
 This file is part of Ansible
 
@@ -25,53 +26,30 @@ DOCUMENTATION = '''
 ---
 module: a10_server
 version_added: 1.8
-short_description: Manage A10 Networks AX/SoftAX/Thunder/vThunder devices
+short_description: Manage A10 Networks AX/SoftAX/Thunder/vThunder devices' server object.
 description:
-    - Manage slb server objects on A10 Networks devices via aXAPI
-author: "Mischa Peters (@mischapeters)"
+    - Manage SLB (Server Load Balancer) server objects on A10 Networks devices via aXAPIv2.
+author: "Eric Chou (@ericchou) 2016, Mischa Peters (@mischapeters) 2014"
 notes:
-    - Requires A10 Networks aXAPI 2.1
+    - Requires A10 Networks aXAPI 2.1.
+extends_documentation_fragment: a10
 options:
-  host:
-    description:
-      - hostname or ip of your A10 Networks device
-    required: true
-    default: null
-    aliases: []
-    choices: []
-  username:
-    description:
-      - admin account of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['user', 'admin']
-    choices: []
-  password:
-    description:
-      - admin password of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['pass', 'pwd']
-    choices: []
   server_name:
     description:
-      - slb server name
+      - The SLB (Server Load Balancer) server name.
     required: true
-    default: null
     aliases: ['server']
-    choices: []
   server_ip:
     description:
-      - slb server IP address
+      - The SLB server IPv4 address.
     required: false
     default: null
     aliases: ['ip', 'address']
-    choices: []
   server_status:
     description:
-      - slb virtual server status
+      - The SLB virtual server status.
     required: false
-    default: enable
+    default: enabled
     aliases: ['status']
     choices: ['enabled', 'disabled']
   server_ports:
@@ -82,15 +60,25 @@ options:
         required when C(state) is C(present).
     required: false
     default: null
-    aliases: []
-    choices: []
   state:
     description:
-      - create, update or remove slb server
+      - This is to specify the operation to create, update or remove SLB server.
     required: false
     default: present
-    aliases: []
     choices: ['present', 'absent']
+  validate_certs:
+    description:
+      - If C(no), SSL certificates will not be validated. This should only be used
+        on personally controlled devices using self-signed certificates.
+    required: false
+    version_added: 2.3
+    default: 'yes'
+    choices: ['yes', 'no']
+
+'''
+
+RETURN = '''
+#
 '''
 
 EXAMPLES = '''
@@ -270,8 +258,8 @@ def main():
         else:
             result = dict(msg="the server was not present")
 
-    # if the config has changed, or we want to force a save, save the config unless otherwise requested
-    if changed or write_config:
+    # if the config has changed, save the config unless otherwise requested
+    if changed and write_config:
         write_result = axapi_call(module, session_url + '&method=system.action.write_memory')
         if axapi_failure(write_result):
             module.fail_json(msg="failed to save the configuration: %s" % write_result['response']['err']['msg'])
@@ -280,9 +268,12 @@ def main():
     axapi_call(module, session_url + '&method=session.close')
     module.exit_json(changed=changed, content=result)
 
-# standard ansible module imports
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
-from ansible.module_utils.a10 import *
+# ansible module imports
+import json
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.urls import url_argument_spec
+from ansible.module_utils.a10 import axapi_call, a10_argument_spec, axapi_authenticate, axapi_failure, axapi_get_port_protocol, axapi_enabled_disabled
 
-main()
+
+if __name__ == '__main__':
+    main()

@@ -162,12 +162,6 @@ project:
   sample: Production
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -215,7 +209,7 @@ class AnsibleCloudStackVmSnapshot(AnsibleCloudStack):
 
                 poll_async = self.module.params.get('poll_async')
                 if res and poll_async:
-                    snapshot = self._poll_job(res, 'vmsnapshot')
+                    snapshot = self.poll_job(res, 'vmsnapshot')
 
         return snapshot
 
@@ -232,7 +226,7 @@ class AnsibleCloudStackVmSnapshot(AnsibleCloudStack):
 
                 poll_async = self.module.params.get('poll_async')
                 if res and poll_async:
-                    res = self._poll_job(res, 'vmsnapshot')
+                    res = self.poll_job(res, 'vmsnapshot')
         return snapshot
 
 
@@ -249,7 +243,7 @@ class AnsibleCloudStackVmSnapshot(AnsibleCloudStack):
 
                 poll_async = self.module.params.get('poll_async')
                 if res and poll_async:
-                    res = self._poll_job(res, 'vmsnapshot')
+                    res = self.poll_job(res, 'vmsnapshot')
             return snapshot
 
         self.module.fail_json(msg="snapshot not found, could not revert VM")
@@ -263,12 +257,12 @@ def main():
         vm = dict(required=True),
         description = dict(default=None),
         zone = dict(default=None),
-        snapshot_memory = dict(choices=BOOLEANS, default=False),
+        snapshot_memory = dict(type='bool', default=False),
         state = dict(choices=['present', 'absent', 'revert'], default='present'),
         domain = dict(default=None),
         account = dict(default=None),
         project = dict(default=None),
-        poll_async = dict(type='bool', choices=BOOLEANS, default=True),
+        poll_async = dict(type='bool', default=True),
     ))
 
     required_together = cs_required_together()
@@ -281,9 +275,6 @@ def main():
         required_together=required_together,
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_vmsnapshot = AnsibleCloudStackVmSnapshot(module)
@@ -298,7 +289,7 @@ def main():
 
         result = acs_vmsnapshot.get_result(snapshot)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

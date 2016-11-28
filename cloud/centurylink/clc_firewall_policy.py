@@ -130,12 +130,7 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-changed:
-    description: A flag indicating if any change was made or not
-    returned: success
-    type: boolean
-    sample: True
-firewall_policy_id
+firewall_policy_id:
     description: The fire wall policy id
     returned: success
     type: string

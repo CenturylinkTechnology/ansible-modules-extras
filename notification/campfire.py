@@ -23,7 +23,6 @@ short_description: Send a message to Campfire
 description:
    - Send a message to Campfire.
    - Messages with newlines will result in a "Paste" message being sent.
-version_added: "1.2"
 options:
   subscription:
     description:
@@ -74,7 +73,7 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             subscription=dict(required=True),
-            token=dict(required=True),
+            token=dict(required=True, no_log=True),
             room=dict(required=True),
             msg=dict(required=True),
             notify=dict(required=False,
@@ -118,14 +117,14 @@ def main():
     # Send some audible notification if requested
     if notify:
         response, info = fetch_url(module, target_url, data=NSTR % cgi.escape(notify), headers=headers)
-    if info['status'] != 200:
-        module.fail_json(msg="unable to send msg: '%s', campfire api"
-                            " returned error code: '%s'" %
-                             (notify, info['status']))
+        if info['status'] not in [200, 201]:
+            module.fail_json(msg="unable to send msg: '%s', campfire api"
+                                " returned error code: '%s'" %
+                                 (notify, info['status']))
 
     # Send the message
     response, info = fetch_url(module, target_url, data=MSTR %cgi.escape(msg), headers=headers)
-    if info['status'] != 200:
+    if info['status'] not in [200, 201]:
         module.fail_json(msg="unable to send msg: '%s', campfire api"
                             " returned error code: '%s'" %
                              (msg, info['status']))

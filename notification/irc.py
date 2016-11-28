@@ -56,9 +56,11 @@ options:
   color:
     description:
       - Text color for the message. ("none" is a valid option in 1.6 or later, in 1.6 and prior, the default color is black, not "none"). 
+        Added 11 more colors in version 2.0.
     required: false
     default: "none"
-    choices: [ "none", "yellow", "red", "green", "blue", "black" ]
+    choices: [ "none", "white", "black", "blue", "green", "red", "brown", "purple", "orange", "yellow", "light_green", "teal", "light_cyan",
+               "light_blue", "pink", "gray", "light_gray"]
   channel:
     description:
       - Channel name.  One of nick_to or channel needs to be set.  When both are set, the message will be sent to both of them.
@@ -95,6 +97,13 @@ options:
         Useful for when using a faux bot and not wanting join/parts between messages.
     default: True
     version_added: "2.0"
+  style:
+    description:
+      - Text style for the message. Note italic does not work on some clients
+    default: None
+    required: False
+    choices: [ "bold", "underline", "reverse", "italic" ]
+    version_added: "2.0"
 
 # informational: requirements for nodes
 requirements: [ socket ]
@@ -104,22 +113,29 @@ author:
 '''
 
 EXAMPLES = '''
-- irc: server=irc.example.net channel="#t1" msg="Hello world"
+- irc:
+    server: irc.example.net
+    channel: "#t1"
+    msg: "Hello world"
 
-- local_action: irc port=6669
-                server="irc.example.net"
-                channel="#t1"
-                msg="All finished at {{ ansible_date_time.iso8601 }}"
-                color=red
-                nick=ansibleIRC
+- local_action:
+    module: irc
+    port: 6669
+    server: "irc.example.net"
+    channel: "#t1"
+    msg: "All finished at {{ ansible_date_time.iso8601 }}"
+    color: red
+    nick: ansibleIRC
 
-- local_action: irc port=6669
-                server="irc.example.net"
-                channel="#t1"
-                nick_to=["nick1", "nick2"]
-                msg="All finished at {{ ansible_date_time.iso8601 }}"
-                color=red
-                nick=ansibleIRC
+- local_action:
+    module: irc
+    port: 6669
+    server: "irc.example.net"
+    channel: "#t1"
+    nick_to: ["nick1", "nick2"]
+    msg: "All finished at {{ ansible_date_time.iso8601 }}"
+    color: red
+    nick: ansibleIRC
 '''
 
 # ===========================================
@@ -134,16 +150,39 @@ from time import sleep
 
 
 def send_msg(msg, server='localhost', port='6667', channel=None, nick_to=[], key=None, topic=None,
-             nick="ansible", color='none', passwd=False, timeout=30, use_ssl=False, part=True):
+             nick="ansible", color='none', passwd=False, timeout=30, use_ssl=False, part=True, style=None):
     '''send message to IRC'''
 
     colornumbers = {
+        'white': "00",
         'black': "01",
+        'blue': "02",
+        'green': "03",
         'red': "04",
-        'green': "09",
+        'brown': "05",
+        'purple': "06",
+        'orange': "07",
         'yellow': "08",
-        'blue': "12",
+        'light_green': "09",
+        'teal': "10",
+        'light_cyan': "11",
+        'light_blue': "12",
+        'pink': "13",
+        'gray': "14",
+        'light_gray': "15",
     }
+
+    stylechoices = {
+        'bold': "\x02",
+        'underline': "\x1F",
+        'reverse': "\x16",
+        'italic': "\x1D",
+    }
+
+    try:
+        styletext = stylechoices[style]
+    except:
+        styletext = ""
 
     try:
         colornumber = colornumbers[color]
@@ -151,7 +190,7 @@ def send_msg(msg, server='localhost', port='6667', channel=None, nick_to=[], key
     except:
         colortext = ""
 
-    message = colortext + msg
+    message = styletext + colortext + msg
 
     irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if use_ssl:
@@ -215,16 +254,21 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             server=dict(default='localhost'),
-            port=dict(default=6667),
+            port=dict(type='int', default=6667),
             nick=dict(default='ansible'),
             nick_to=dict(required=False, type='list'),
             msg=dict(required=True),
-            color=dict(default="none", choices=["yellow", "red", "green",
-                                                 "blue", "black", "none"]),
+            color=dict(default="none", aliases=['colour'], choices=["white", "black", "blue",
+                                                "green", "red", "brown",
+                                                "purple", "orange", "yellow",
+                                                "light_green", "teal", "light_cyan",
+                                                "light_blue", "pink", "gray",
+                                                "light_gray", "none"]),
+            style=dict(default="none", choices=["underline", "reverse", "bold", "italic", "none"]),
             channel=dict(required=False),
-            key=dict(),
+            key=dict(no_log=True),
             topic=dict(),
-            passwd=dict(),
+            passwd=dict(no_log=True),
             timeout=dict(type='int', default=30),
             part=dict(type='bool', default=True),
             use_ssl=dict(type='bool', default=False)
@@ -248,10 +292,12 @@ def main():
     timeout = module.params["timeout"]
     use_ssl = module.params["use_ssl"]
     part = module.params["part"]
+    style = module.params["style"]
 
     try:
-        send_msg(msg, server, port, channel, nick_to, key, topic, nick, color, passwd, timeout, use_ssl, part)
-    except Exception, e:
+        send_msg(msg, server, port, channel, nick_to, key, topic, nick, color, passwd, timeout, use_ssl, part, style)
+    except Exception:
+        e = get_exception()
         module.fail_json(msg="unable to send to IRC: %s" % e)
 
     module.exit_json(changed=False, channel=channel, nick=nick,
@@ -259,4 +305,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 main()

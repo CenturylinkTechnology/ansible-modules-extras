@@ -22,7 +22,7 @@ module: postgresql_ext
 short_description: Add or remove PostgreSQL extensions from a database.
 description:
    - Add or remove PostgreSQL extensions from a database.
-version_added: "0.1"
+version_added: "1.9"
 options:
   name:
     description:
@@ -118,7 +118,7 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             login_user=dict(default="postgres"),
-            login_password=dict(default=""),
+            login_password=dict(default="", no_log=True),
             login_host=dict(default=""),
             port=dict(default="5432"),
             db=dict(required=True),
@@ -159,30 +159,33 @@ def main():
                                               .ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = db_connection.cursor(
                 cursor_factory=psycopg2.extras.DictCursor)
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg="unable to connect to database: %s" % e)
 
     try:
         if module.check_mode:
+            if state == "present":
+                changed = not ext_exists(cursor, ext)
+            elif state == "absent":
+                changed = ext_exists(cursor, ext)
+        else:
             if state == "absent":
-                changed = not db_exists(cursor, ext)
+                changed = ext_delete(cursor, ext)
+    
             elif state == "present":
-                changed = db_exists(cursor, ext)
-            module.exit_json(changed=changed,ext=ext)
-
-        if state == "absent":
-            changed = ext_delete(cursor, ext)
-
-        elif state == "present":
-            changed = ext_create(cursor, ext)
-    except NotSupportedError, e:
+                changed = ext_create(cursor, ext)
+    except NotSupportedError:
+        e = get_exception()
         module.fail_json(msg=str(e))
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg="Database query failed: %s" % e)
 
-    module.exit_json(changed=changed, db=db)
+    module.exit_json(changed=changed, db=db, ext=ext)
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 main()
 

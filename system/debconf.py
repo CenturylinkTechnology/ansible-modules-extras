@@ -51,11 +51,11 @@ options:
     aliases: ['setting', 'selection']
   vtype:
     description:
-      - The type of the value supplied
+      - The type of the value supplied.
+      - C(seen) was added in 2.2.
     required: false
     default: null
-    choices: [string, password, boolean, select, multiselect, note, error, title, text]
-    aliases: []
+    choices: [string, password, boolean, select, multiselect, note, error, title, text, seen]
   value:
     description:
       -  Value to set the configuration to
@@ -67,7 +67,6 @@ options:
       - Do not set 'seen' flag when pre-seeding
     required: false
     default: False
-    aliases: []
 author: "Brian Coca (@bcoca)"
 
 '''
@@ -109,6 +108,11 @@ def set_selection(module, pkg, question, vtype, value, unseen):
     if unseen:
         cmd.append('-u')
 
+    if vtype == 'boolean':
+        if value == 'True':
+            value = 'true'
+        elif value == 'False':
+            value = 'false'
     data = ' '.join([pkg, question, vtype, value])
 
     return module.run_command(cmd, data=data)
@@ -119,8 +123,8 @@ def main():
         argument_spec = dict(
            name = dict(required=True, aliases=['pkg'], type='str'),
            question = dict(required=False, aliases=['setting', 'selection'], type='str'),
-           vtype = dict(required=False, type='str', choices=['string', 'password', 'boolean', 'select',  'multiselect', 'note', 'error', 'title', 'text']),
-           value= dict(required=False, type='str'),
+           vtype = dict(required=False, type='str', choices=['string', 'password', 'boolean', 'select',  'multiselect', 'note', 'error', 'title', 'text', 'seen']),
+           value = dict(required=False, type='str', aliases=['answer']),
            unseen = dict(required=False, type='bool'),
         ),
         required_together = ( ['question','vtype', 'value'],),
@@ -157,8 +161,14 @@ def main():
             prev = {question: prev[question]}
         else:
             prev[question] = ''
+        if module._diff:
+            after = prev.copy()
+            after.update(curr)
+            diff_dict = {'before': prev, 'after': after}
+        else:
+            diff_dict = {}
 
-        module.exit_json(changed=changed, msg=msg, current=curr, previous=prev)
+        module.exit_json(changed=changed, msg=msg, current=curr, previous=prev, diff=diff_dict)
 
     module.exit_json(changed=changed, msg=msg, current=prev)
 

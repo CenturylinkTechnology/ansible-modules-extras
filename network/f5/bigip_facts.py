@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-
+#
 # (c) 2013, Matt Hite <mhite@hotmail.com>
 #
 # This file is part of Ansible
@@ -21,98 +21,78 @@
 DOCUMENTATION = '''
 ---
 module: bigip_facts
-short_description: "Collect facts from F5 BIG-IP devices"
+short_description: Collect facts from F5 BIG-IP devices
 description:
-    - "Collect facts from F5 BIG-IP devices via iControl SOAP API"
+  - Collect facts from F5 BIG-IP devices via iControl SOAP API
 version_added: "1.6"
-author: "Matt Hite (@mhite)" 
+author:
+  - Matt Hite (@mhite)
+  - Tim Rupp (@caphrim007)
 notes:
-    - "Requires BIG-IP software version >= 11.4"
-    - "F5 developed module 'bigsuds' required (see http://devcentral.f5.com)"
-    - "Best run as a local_action in your playbook"
-    - "Tested with manager and above account privilege level"
-
+  - Requires BIG-IP software version >= 11.4
+  - F5 developed module 'bigsuds' required (see http://devcentral.f5.com)
+  - Best run as a local_action in your playbook
+  - Tested with manager and above account privilege level
+  - C(provision) facts were added in 2.2
 requirements:
-    - bigsuds
+  - bigsuds
 options:
-    server:
-        description:
-            - BIG-IP host
-        required: true
-        default: null
-        choices: []
-        aliases: []
-    user:
-        description:
-            - BIG-IP username
-        required: true
-        default: null
-        choices: []
-        aliases: []
-    password:
-        description:
-            - BIG-IP password
-        required: true
-        default: null
-        choices: []
-        aliases: []
-    validate_certs:
-        description:
-            - If C(no), SSL certificates will not be validated. This should only be used
-              on personally controlled sites using self-signed certificates.
-        required: false
-        default: 'yes'
-        choices: ['yes', 'no']
-        version_added: 2.0
-    session:
-        description:
-            - BIG-IP session support; may be useful to avoid concurrency
-              issues in certain circumstances.
-        required: false
-        default: true
-        choices: []
-        aliases: []
-    include:
-        description:
-            - Fact category or list of categories to collect
-        required: true
-        default: null
-        choices: ['address_class', 'certificate', 'client_ssl_profile',
-                  'device', 'device_group', 'interface', 'key', 'node', 'pool',
-                  'rule', 'self_ip', 'software', 'system_info', 'traffic_group',
-                  'trunk', 'virtual_address', 'virtual_server', 'vlan']
-        aliases: []
-    filter:
-        description:
-            - Shell-style glob matching string used to filter fact keys. Not
-              applicable for software and system_info fact categories.
-        required: false
-        default: null
-        choices: []
-        aliases: []
+  session:
+    description:
+      - BIG-IP session support; may be useful to avoid concurrency
+        issues in certain circumstances.
+    required: false
+    default: true
+    choices: []
+    aliases: []
+  include:
+    description:
+      - Fact category or list of categories to collect
+    required: true
+    default: null
+    choices:
+      - address_class
+      - certificate
+      - client_ssl_profile
+      - device
+      - device_group
+      - interface
+      - key
+      - node
+      - pool
+      - provision
+      - rule
+      - self_ip
+      - software
+      - system_info
+      - traffic_group
+      - trunk
+      - virtual_address
+      - virtual_server
+      - vlan
+    aliases: []
+  filter:
+    description:
+      - Shell-style glob matching string used to filter fact keys. Not
+        applicable for software, provision, and system_info fact categories.
+    required: false
+    default: null
+    choices: []
+    aliases: []
+extends_documentation_fragment: f5
 '''
 
 EXAMPLES = '''
-
-## playbook task examples:
-
----
-# file bigip-test.yml
-# ...
-- hosts: bigip-test
-  tasks:
-  - name: Collect BIG-IP facts
-    local_action: >
-      bigip_facts
-      server=lb.mydomain.com
-      user=admin
-      password=mysecret
-      include=interface,vlan
-
+- name: Collect BIG-IP facts
+  bigip_facts:
+      server: "lb.mydomain.com"
+      user: "admin"
+      password: "secret"
+      include: "interface,vlan"
+  delegate_to: localhost
 '''
 
 try:
-    import bigsuds
     from suds import MethodNotFound, WebFault
 except ImportError:
     bigsuds_found = False
@@ -120,12 +100,9 @@ else:
     bigsuds_found = True
 
 import fnmatch
-import traceback
 import re
+import traceback
 
-# ===========================================
-# bigip_facts module specific support methods.
-#
 
 class F5(object):
     """F5 iControl class.
@@ -136,8 +113,8 @@ class F5(object):
         api: iControl API instance.
     """
 
-    def __init__(self, host, user, password, session=False):
-        self.api = bigsuds.BIGIP(hostname=host, username=user, password=password)
+    def __init__(self, host, user, password, session=False, validate_certs=True, port=443):
+        self.api = bigip_api(host, user, password, validate_certs, port)
         if session:
             self.start_session()
 
@@ -967,6 +944,7 @@ class Rules(object):
     def get_definition(self):
         return [x['rule_definition'] for x in self.api.LocalLB.Rule.query_rule(rule_names=self.rules)]
 
+
 class Nodes(object):
     """Nodes class.
 
@@ -1101,7 +1079,7 @@ class AddressClasses(object):
     def get_address_class(self):
         key = self.api.LocalLB.Class.get_address_class(self.address_classes)
         value = self.api.LocalLB.Class.get_address_class_member_data_value(key)
-        result = map(zip, [x['members'] for x in key], value)
+        result = list(map(zip, [x['members'] for x in key], value))
         return result
 
     def get_description(self):
@@ -1364,6 +1342,35 @@ class SystemInfo(object):
         return self.api.System.SystemInfo.get_uptime()
 
 
+class ProvisionInfo(object):
+    """Provision information class.
+
+    F5 BIG-IP provision information class.
+
+    Attributes:
+        api: iControl API instance.
+    """
+
+    def __init__(self, api):
+        self.api = api
+
+    def get_list(self):
+        result = []
+        list = self.api.Management.Provision.get_list()
+        for item in list:
+            item = item.lower().replace('tmos_module_', '')
+            result.append(item)
+        return result
+
+    def get_provisioned_list(self):
+        result = []
+        list = self.api.Management.Provision.get_provisioned_list()
+        for item in list:
+            item = item.lower().replace('tmos_module_', '')
+            result.append(item)
+        return result
+
+
 def generate_dict(api_obj, fields):
     result_dict = {}
     lists = []
@@ -1383,6 +1390,7 @@ def generate_dict(api_obj, fields):
             result_dict[j] = temp
     return result_dict
 
+
 def generate_simple_dict(api_obj, fields):
     result_dict = {}
     for field in fields:
@@ -1393,6 +1401,7 @@ def generate_simple_dict(api_obj, fields):
         else:
             result_dict[field] = api_response
     return result_dict
+
 
 def generate_interface_dict(f5, regex):
     interfaces = Interfaces(f5.get_api(), regex)
@@ -1408,6 +1417,7 @@ def generate_interface_dict(f5, regex):
               'stp_protocol_detection_reset_state']
     return generate_dict(interfaces, fields)
 
+
 def generate_self_ip_dict(f5, regex):
     self_ips = SelfIPs(f5.get_api(), regex)
     fields = ['address', 'allow_access_list', 'description',
@@ -1415,6 +1425,7 @@ def generate_self_ip_dict(f5, regex):
               'netmask', 'staged_firewall_policy', 'traffic_group',
               'vlan', 'is_traffic_group_inherited']
     return generate_dict(self_ips, fields)
+
 
 def generate_trunk_dict(f5, regex):
     trunks = Trunks(f5.get_api(), regex)
@@ -1424,6 +1435,7 @@ def generate_trunk_dict(f5, regex):
               'media_status', 'operational_member_count', 'stp_enabled_state',
               'stp_protocol_detection_reset_state']
     return generate_dict(trunks, fields)
+
 
 def generate_vlan_dict(f5, regex):
     vlans = Vlans(f5.get_api(), regex)
@@ -1435,6 +1447,7 @@ def generate_vlan_dict(f5, regex):
               'sflow_sampling_rate', 'sflow_sampling_rate_global',
               'source_check_state', 'true_mac_address', 'vlan_id']
     return generate_dict(vlans, fields)
+
 
 def generate_vs_dict(f5, regex):
     virtual_servers = VirtualServers(f5.get_api(), regex)
@@ -1456,6 +1469,7 @@ def generate_vs_dict(f5, regex):
               'translate_port_state', 'type', 'vlan', 'wildmask']
     return generate_dict(virtual_servers, fields)
 
+
 def generate_pool_dict(f5, regex):
     pools = Pools(f5.get_api(), regex)
     fields = ['action_on_service_down', 'active_member_count',
@@ -1472,6 +1486,7 @@ def generate_pool_dict(f5, regex):
               'simple_timeout', 'slow_ramp_time']
     return generate_dict(pools, fields)
 
+
 def generate_device_dict(f5, regex):
     devices = Devices(f5.get_api(), regex)
     fields = ['active_modules', 'base_mac_address', 'blade_addresses',
@@ -1484,13 +1499,15 @@ def generate_device_dict(f5, regex):
               'timelimited_modules', 'timezone', 'unicast_addresses']
     return generate_dict(devices, fields)
 
+
 def generate_device_group_dict(f5, regex):
     device_groups = DeviceGroups(f5.get_api(), regex)
-    fields = ['all_preferred_active', 'autosync_enabled_state','description',
+    fields = ['all_preferred_active', 'autosync_enabled_state', 'description',
               'device', 'full_load_on_sync_state',
               'incremental_config_sync_size_maximum',
               'network_failover_enabled_state', 'sync_status', 'type']
     return generate_dict(device_groups, fields)
+
 
 def generate_traffic_group_dict(f5, regex):
     traffic_groups = TrafficGroups(f5.get_api(), regex)
@@ -1500,11 +1517,13 @@ def generate_traffic_group_dict(f5, regex):
               'unit_id']
     return generate_dict(traffic_groups, fields)
 
+
 def generate_rule_dict(f5, regex):
     rules = Rules(f5.get_api(), regex)
     fields = ['definition', 'description', 'ignore_vertification',
               'verification_status']
     return generate_dict(rules, fields)
+
 
 def generate_node_dict(f5, regex):
     nodes = Nodes(f5.get_api(), regex)
@@ -1512,6 +1531,7 @@ def generate_node_dict(f5, regex):
               'monitor_instance', 'monitor_rule', 'monitor_status',
               'object_status', 'rate_limit', 'ratio', 'session_status']
     return generate_dict(nodes, fields)
+
 
 def generate_virtual_address_dict(f5, regex):
     virtual_addresses = VirtualAddresses(f5.get_api(), regex)
@@ -1521,18 +1541,22 @@ def generate_virtual_address_dict(f5, regex):
               'route_advertisement_state', 'traffic_group']
     return generate_dict(virtual_addresses, fields)
 
+
 def generate_address_class_dict(f5, regex):
     address_classes = AddressClasses(f5.get_api(), regex)
     fields = ['address_class', 'description']
     return generate_dict(address_classes, fields)
 
+
 def generate_certificate_dict(f5, regex):
     certificates = Certificates(f5.get_api(), regex)
     return dict(zip(certificates.get_list(), certificates.get_certificate_list()))
 
+
 def generate_key_dict(f5, regex):
     keys = Keys(f5.get_api(), regex)
     return dict(zip(keys.get_list(), keys.get_key_list()))
+
 
 def generate_client_ssl_profile_dict(f5, regex):
     profiles = ProfileClientSSL(f5.get_api(), regex)
@@ -1557,6 +1581,7 @@ def generate_client_ssl_profile_dict(f5, regex):
               'unclean_shutdown_state', 'is_base_profile', 'is_system_profile']
     return generate_dict(profiles, fields)
 
+
 def generate_system_info_dict(f5):
     system_info = SystemInfo(f5.get_api())
     fields = ['base_mac_address',
@@ -1569,62 +1594,68 @@ def generate_system_info_dict(f5):
               'time_zone', 'uptime']
     return generate_simple_dict(system_info, fields)
 
+
 def generate_software_list(f5):
     software = Software(f5.get_api())
     software_list = software.get_all_software_status()
     return software_list
 
-def disable_ssl_cert_validation():
-    # You probably only want to do this for testing and never in production.
-    # From https://www.python.org/dev/peps/pep-0476/#id29
-    import ssl
-    ssl._create_default_https_context = ssl._create_unverified_context
+
+def generate_provision_dict(f5):
+    provisioned = ProvisionInfo(f5.get_api())
+    fields = ['list', 'provisioned_list']
+    return generate_simple_dict(provisioned, fields)
 
 
 def main():
+    argument_spec = f5_argument_spec()
+
+    meta_args = dict(
+        session=dict(type='bool', default=False),
+        include=dict(type='list', required=True),
+        filter=dict(type='str', required=False),
+    )
+    argument_spec.update(meta_args)
+
     module = AnsibleModule(
-        argument_spec = dict(
-            server = dict(type='str', required=True),
-            user = dict(type='str', required=True),
-            password = dict(type='str', required=True),
-            validate_certs = dict(default='yes', type='bool'),
-            session = dict(type='bool', default=False),
-            include = dict(type='list', required=True),
-            filter = dict(type='str', required=False),
-        )
+        argument_spec=argument_spec
     )
 
     if not bigsuds_found:
-        module.fail_json(msg="the python suds and bigsuds modules is required")
+        module.fail_json(msg="the python suds and bigsuds modules are required")
 
     server = module.params['server']
+    server_port = module.params['server_port']
     user = module.params['user']
     password = module.params['password']
     validate_certs = module.params['validate_certs']
     session = module.params['session']
     fact_filter = module.params['filter']
+
+    if validate_certs:
+        import ssl
+        if not hasattr(ssl, 'SSLContext'):
+            module.fail_json(msg='bigsuds does not support verifying certificates with python < 2.7.9.  Either update python or set validate_certs=False on the task')
+
     if fact_filter:
         regex = fnmatch.translate(fact_filter)
     else:
         regex = None
-    include = map(lambda x: x.lower(), module.params['include'])
+    include = [x.lower() for x in module.params['include']]
     valid_includes = ('address_class', 'certificate', 'client_ssl_profile',
                       'device', 'device_group', 'interface', 'key', 'node',
-                      'pool', 'rule', 'self_ip', 'software', 'system_info',
-                      'traffic_group', 'trunk', 'virtual_address',
-                      'virtual_server', 'vlan')
+                      'pool', 'provision', 'rule', 'self_ip', 'software',
+                      'system_info', 'traffic_group', 'trunk',
+                      'virtual_address', 'virtual_server', 'vlan')
     include_test = map(lambda x: x in valid_includes, include)
     if not all(include_test):
         module.fail_json(msg="value of include must be one or more of: %s, got: %s" % (",".join(valid_includes), ",".join(include)))
-
-    if not validate_certs:
-        disable_ssl_cert_validation()
 
     try:
         facts = {}
 
         if len(include) > 0:
-            f5 = F5(server, user, password, session)
+            f5 = F5(server, user, password, session, validate_certs, server_port)
             saved_active_folder = f5.get_active_folder()
             saved_recursive_query_state = f5.get_recursive_query_state()
             if saved_active_folder != "/":
@@ -1644,6 +1675,8 @@ def main():
                 facts['virtual_server'] = generate_vs_dict(f5, regex)
             if 'pool' in include:
                 facts['pool'] = generate_pool_dict(f5, regex)
+            if 'provision' in include:
+                facts['provision'] = generate_provision_dict(f5)
             if 'device' in include:
                 facts['device'] = generate_device_dict(f5, regex)
             if 'device_group' in include:
@@ -1678,14 +1711,14 @@ def main():
 
         result = {'ansible_facts': facts}
 
-    except Exception, e:
+    except Exception as e:
         module.fail_json(msg="received exception: %s\ntraceback: %s" % (e, traceback.format_exc()))
 
     module.exit_json(**result)
 
 # include magic from lib/ansible/module_common.py
 from ansible.module_utils.basic import *
+from ansible.module_utils.f5 import *
 
 if __name__ == '__main__':
     main()
-

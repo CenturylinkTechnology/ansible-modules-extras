@@ -135,7 +135,6 @@ EXAMPLES = '''
     public_port: 53
     private_port: 53
     protocol: udp
-    open_firewall: true
 
 # remove ssh port forwarding
 - local_action:
@@ -204,12 +203,6 @@ vm_guest_ip:
   sample: 10.101.65.152
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -231,36 +224,9 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
             'publicport':       'public_port',
             'publicendport':    'public_end_port',
             'privateport':      'private_port',
-            'private_end_port': 'private_end_port',
+            'privateendport':   'private_end_port',
         }
         self.portforwarding_rule = None
-        self.vm_default_nic = None
-
-
-    def get_vm_guest_ip(self):
-        vm_guest_ip = self.module.params.get('vm_guest_ip')
-        default_nic = self.get_vm_default_nic()
-
-        if not vm_guest_ip:
-            return default_nic['ipaddress']
-
-        for secondary_ip in default_nic['secondaryip']:
-            if vm_guest_ip == secondary_ip['ipaddress']:
-                return vm_guest_ip
-        self.module.fail_json(msg="Secondary IP '%s' not assigned to VM" % vm_guest_ip)
-
-
-    def get_vm_default_nic(self):
-        if self.vm_default_nic:
-            return self.vm_default_nic
-
-        nics = self.cs.listNics(virtualmachineid=self.get_vm(key='id'))
-        if nics:
-            for n in nics['nic']:
-                if n['isdefault']:
-                    self.vm_default_nic = n
-                    return self.vm_default_nic
-        self.module.fail_json(msg="No default IP address of VM '%s' found" % self.module.params.get('vm'))
 
 
     def get_portforwarding_rule(self):
@@ -273,6 +239,8 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
 
             args = {}
             args['ipaddressid'] = self.get_ip_address(key='id')
+            args['account'] = self.get_account(key='name')
+            args['domainid'] = self.get_domain(key='id')
             args['projectid'] = self.get_project(key='id')
             portforwarding_rules = self.cs.listPortForwardingRules(**args)
 
@@ -305,6 +273,8 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
         args['vmguestip']           = self.get_vm_guest_ip()
         args['ipaddressid']         = self.get_ip_address(key='id')
         args['virtualmachineid']    = self.get_vm(key='id')
+        args['account']             = self.get_account(key='name')
+        args['domainid']            = self.get_domain(key='id')
 
         portforwarding_rule = None
         self.result['changed'] = True
@@ -312,7 +282,7 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
             portforwarding_rule = self.cs.createPortForwardingRule(**args)
             poll_async = self.module.params.get('poll_async')
             if poll_async:
-                portforwarding_rule = self._poll_job(portforwarding_rule, 'portforwardingrule')
+                portforwarding_rule = self.poll_job(portforwarding_rule, 'portforwardingrule')
         return portforwarding_rule
 
 
@@ -323,12 +293,11 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
         args['publicendport']       = self.get_or_fallback('public_end_port', 'public_port')
         args['privateport']         = self.module.params.get('private_port')
         args['privateendport']      = self.get_or_fallback('private_end_port', 'private_port')
-        args['openfirewall']        = self.module.params.get('open_firewall')
         args['vmguestip']           = self.get_vm_guest_ip()
         args['ipaddressid']         = self.get_ip_address(key='id')
         args['virtualmachineid']    = self.get_vm(key='id')
 
-        if self._has_changed(args, portforwarding_rule):
+        if self.has_changed(args, portforwarding_rule):
             self.result['changed'] = True
             if not self.module.check_mode:
                 # API broken in 4.2.1?, workaround using remove/create instead of update
@@ -337,7 +306,7 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
                 portforwarding_rule = self.cs.createPortForwardingRule(**args)
                 poll_async = self.module.params.get('poll_async')
                 if poll_async:
-                    portforwarding_rule = self._poll_job(portforwarding_rule, 'portforwardingrule')
+                    portforwarding_rule = self.poll_job(portforwarding_rule, 'portforwardingrule')
         return portforwarding_rule
 
 
@@ -353,7 +322,7 @@ class AnsibleCloudStackPortforwarding(AnsibleCloudStack):
                 res = self.cs.deletePortForwardingRule(**args)
                 poll_async = self.module.params.get('poll_async')
                 if poll_async:
-                    self._poll_job(res, 'portforwardingrule')
+                    self.poll_job(res, 'portforwardingrule')
         return portforwarding_rule
 
 
@@ -377,14 +346,14 @@ def main():
         private_port = dict(type='int', required=True),
         private_end_port = dict(type='int', default=None),
         state = dict(choices=['present', 'absent'], default='present'),
-        open_firewall = dict(choices=BOOLEANS, default=False),
+        open_firewall = dict(type='bool', default=False),
         vm_guest_ip = dict(default=None),
         vm = dict(default=None),
         zone = dict(default=None),
         domain = dict(default=None),
         account = dict(default=None),
         project = dict(default=None),
-        poll_async = dict(choices=BOOLEANS, default=True),
+        poll_async = dict(type='bool', default=True),
     ))
 
     module = AnsibleModule(
@@ -392,9 +361,6 @@ def main():
         required_together=cs_required_together(),
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_pf = AnsibleCloudStackPortforwarding(module)
@@ -406,7 +372,7 @@ def main():
 
         result = acs_pf.get_result(pf_rule)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

@@ -3,7 +3,8 @@
 
 """
 Ansible module to manage A10 Networks slb virtual server objects
-(c) 2014, Mischa Peters <mpeters@a10networks.com>
+(c) 2014, Mischa Peters <mpeters@a10networks.com>,
+Eric Chou <ericc@a10networks.com>
 
 This file is part of Ansible
 
@@ -25,52 +26,29 @@ DOCUMENTATION = '''
 ---
 module: a10_virtual_server
 version_added: 1.8
-short_description: Manage A10 Networks devices' virtual servers
+short_description: Manage A10 Networks AX/SoftAX/Thunder/vThunder devices' virtual servers.
 description:
-    - Manage slb virtual server objects on A10 Networks devices via aXAPI
-author: "Mischa Peters (@mischapeters)"
+    - Manage SLB (Server Load Balancing) virtual server objects on A10 Networks devices via aXAPIv2.
+author: "Eric Chou (@ericchou) 2016, Mischa Peters (@mischapeters) 2014"
 notes:
-    - Requires A10 Networks aXAPI 2.1
-requirements: []
+    - Requires A10 Networks aXAPI 2.1.
+extends_documentation_fragment: a10
 options:
-  host:
-    description:
-      - hostname or ip of your A10 Networks device
-    required: true
-    default: null
-    aliases: []
-    choices: []
-  username:
-    description:
-      - admin account of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['user', 'admin']
-    choices: []
-  password:
-    description:
-      - admin password of your A10 Networks device
-    required: true
-    default: null
-    aliases: ['pass', 'pwd']
-    choices: []
   virtual_server:
     description:
-      - slb virtual server name
+      - The SLB (Server Load Balancing) virtual server name.
     required: true
     default: null
     aliases: ['vip', 'virtual']
-    choices: []
   virtual_server_ip:
     description:
-      - slb virtual server ip address
+      - The SLB virtual server IPv4 address.
     required: false
     default: null
     aliases: ['ip', 'address']
-    choices: []
   virtual_server_status:
     description:
-      - slb virtual server status
+      - The SLB virtual server status, such as enabled or disabled.
     required: false
     default: enable
     aliases: ['status']
@@ -82,15 +60,6 @@ options:
         specify the C(service_group:) as well as the C(status:). See the examples
         below for details. This parameter is required when C(state) is C(present).
     required: false
-  write_config:
-    description:
-      - If C(yes), any changes will cause a write of the running configuration
-        to non-volatile memory. This will save I(all) configuration changes,
-        including those that may have been made manually or through other modules,
-        so care should be taken when specifying C(yes).
-    required: false
-    default: "no"
-    choices: ["yes", "no"]
   validate_certs:
     description:
       - If C(no), SSL certificates will not be validated. This should only be used
@@ -99,6 +68,10 @@ options:
     default: 'yes'
     choices: ['yes', 'no']
 
+'''
+
+RETURN = '''
+#
 '''
 
 EXAMPLES = '''
@@ -289,9 +262,11 @@ def main():
     module.exit_json(changed=changed, content=result)
 
 # standard ansible module imports
-from ansible.module_utils.basic import *
-from ansible.module_utils.urls import *
-from ansible.module_utils.a10 import *
+import json
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.urls import url_argument_spec
+from ansible.module_utils.a10 import axapi_call, a10_argument_spec, axapi_authenticate, axapi_failure, axapi_enabled_disabled, axapi_get_vport_protocol
+
+
 if __name__ == '__main__':
     main()
-

@@ -20,17 +20,17 @@ module: dnsmadeeasy
 version_added: "1.3"
 short_description: Interface with dnsmadeeasy.com (a DNS hosting service).
 description:
-   - "Manages DNS records via the v2 REST API of the DNS Made Easy service.  It handles records only; there is no manipulation of domains or monitor/account support yet. See: U(http://www.dnsmadeeasy.com/services/rest-api/)"
+   - "Manages DNS records via the v2 REST API of the DNS Made Easy service.  It handles records only; there is no manipulation of domains or monitor/account support yet. See: U(https://www.dnsmadeeasy.com/integration/restapi/)"
 options:
   account_key:
     description:
-      - Accout API Key.
+      - Account API Key.
     required: true
     default: null
     
   account_secret:
     description:
-      - Accout Secret Key.
+      - Account Secret Key.
     required: true
     default: null
     
@@ -99,7 +99,7 @@ EXAMPLES = '''
 - dnsmadeeasy: account_key=key account_secret=secret domain=my.com state=present record_name="test" record_type="A" record_value="127.0.0.1"
 
 # update the previously created record
-- dnsmadeeasy: account_key=key account_secret=secret domain=my.com state=present record_name="test" record_value="192.168.0.1"
+- dnsmadeeasy: account_key=key account_secret=secret domain=my.com state=present record_name="test" record_value="192.0.2.23"
 
 # fetch a specific record
 - dnsmadeeasy: account_key=key account_secret=secret domain=my.com state=present record_name="test"
@@ -121,7 +121,8 @@ try:
     from time import strftime, gmtime
     import hashlib
     import hmac
-except ImportError, e:
+except ImportError:
+    e = get_exception()
     IMPORT_ERROR = str(e)
 
 class DME2:
@@ -170,7 +171,7 @@ class DME2:
 
         try:
             return json.load(response)
-        except Exception, e:
+        except Exception:
             return {}
 
     def getDomain(self, domain_id):
@@ -204,16 +205,17 @@ class DME2:
         if not self.all_records:
             self.all_records = self.getRecords()
 
-        # TODO SRV type not yet implemented
         if record_type in ["A", "AAAA", "CNAME", "HTTPRED", "PTR"]:
             for result in self.all_records:
                 if result['name'] == record_name and result['type'] == record_type:
                     return result
             return False
-        elif record_type in ["MX", "NS", "TXT"]:
+        elif record_type in ["MX", "NS", "TXT", "SRV"]:
             for result in self.all_records:
                 if record_type == "MX":
                     value = record_value.split(" ")[1]
+                elif record_type == "SRV":
+                    value = record_value.split(" ")[3]
                 else:
                     value = record_value
                 if result['name'] == record_name and result['type'] == record_type and result['value'] == value:
@@ -308,6 +310,13 @@ def main():
     if new_record["type"] == "MX":
         new_record["mxLevel"] = new_record["value"].split(" ")[0]
         new_record["value"] = new_record["value"].split(" ")[1]
+
+    # Special handling for SRV records
+    if new_record["type"] == "SRV":
+        new_record["priority"] = new_record["value"].split(" ")[0]
+        new_record["weight"] = new_record["value"].split(" ")[1]
+        new_record["port"] = new_record["value"].split(" ")[2]
+        new_record["value"] = new_record["value"].split(" ")[3]
 
     # Compare new record against existing one
     changed = False

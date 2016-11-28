@@ -53,7 +53,46 @@ try:
 except ImportError:
     HAS_BOTO = False
 
+try:
+    import boto3
+    from botocore.exceptions import ClientError, NoCredentialsError
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import (AnsibleAWSError,
+        ansible_dict_to_boto3_filter_list, boto3_conn,
+        boto3_tag_list_to_ansible_dict, camel_dict_to_snake_dict,
+        connect_to_aws, ec2_argument_spec, get_aws_connection_info)
+
+
+def list_ec2_snapshots_boto3(connection, module):
+
+    if module.params.get("filters") is None:
+        filters = []
+    else:
+        filters = ansible_dict_to_boto3_filter_list(module.params.get("filters"))
+
+    try:
+        network_interfaces_result = connection.describe_network_interfaces(Filters=filters)
+    except (ClientError, NoCredentialsError) as e:
+        module.fail_json(msg=e.message)
+
+    # Turn the boto3 result in to ansible_friendly_snaked_names
+    snaked_network_interfaces_result = camel_dict_to_snake_dict(network_interfaces_result)
+    for network_interfaces in snaked_network_interfaces_result['network_interfaces']:
+        network_interfaces['tag_set'] = boto3_tag_list_to_ansible_dict(network_interfaces['tag_set'])
+
+    module.exit_json(**snaked_network_interfaces_result)
+
+
 def get_eni_info(interface):
+
+    # Private addresses
+    private_addresses = []
+    for ip in interface.private_ip_addresses:
+        private_addresses.append({ 'private_ip_address': ip.private_ip_address, 'primary_address': ip.primary })
 
     interface_info = {'id': interface.id,
                       'subnet_id': interface.subnet_id,
@@ -65,7 +104,14 @@ def get_eni_info(interface):
                       'private_ip_address': interface.private_ip_address,
                       'source_dest_check': interface.source_dest_check,
                       'groups': dict((group.id, group.name) for group in interface.groups),
+                      'private_ip_addresses': private_addresses
                       }
+
+    if hasattr(interface, 'publicDnsName'):
+        interface_info['association'] = {'public_ip_address': interface.publicIp,
+                                         'public_dns_name': interface.publicDnsName,
+                                         'ip_owner_id': interface.ipOwnerId
+                                         }
 
     if interface.attachment is not None:
         interface_info['attachment'] = {'attachment_id': interface.attachment.id,
@@ -108,20 +154,28 @@ def main():
     if not HAS_BOTO:
         module.fail_json(msg='boto required for this module')
 
-    region, ec2_url, aws_connect_params = get_aws_connection_info(module)
+    if HAS_BOTO3:
+        region, ec2_url, aws_connect_params = get_aws_connection_info(module, boto3=True)
 
-    if region:
-        try:
-            connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
-            module.fail_json(msg=str(e))
+        if region:
+            connection = boto3_conn(module, conn_type='client', resource='ec2', region=region, endpoint=ec2_url, **aws_connect_params)
+        else:
+            module.fail_json(msg="region must be specified")
+
+        list_ec2_snapshots_boto3(connection, module)
     else:
-        module.fail_json(msg="region must be specified")
+        region, ec2_url, aws_connect_params = get_aws_connection_info(module)
 
-    list_eni(connection, module)
+        if region:
+            try:
+                connection = connect_to_aws(boto.ec2, region, **aws_connect_params)
+            except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
+                module.fail_json(msg=str(e))
+        else:
+            module.fail_json(msg="region must be specified")
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
+        list_eni(connection, module)
+
 
 if __name__ == '__main__':
     main()

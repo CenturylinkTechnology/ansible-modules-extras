@@ -29,7 +29,7 @@ options:
     default: null
   cidr:
     description:
-      - "The CIDR block for the subnet. E.g. 10.0.0.0/16. Only required when state=present."
+      - "The CIDR block for the subnet. E.g. 192.0.2.0/24. Only required when state=present."
     required: false
     default: null
   tags:
@@ -71,10 +71,9 @@ EXAMPLES = '''
     state: absent
     vpc_id: vpc-123456
     cidr: 10.0.1.16/28
-    
+
 '''
 
-import sys  # noqa
 import time
 
 try:
@@ -86,6 +85,9 @@ except ImportError:
     HAS_BOTO = False
     if __name__ != '__main__':
         raise
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import AnsibleAWSError, connect_to_aws, ec2_argument_spec, get_aws_connection_info
 
 
 class AnsibleVPCSubnetException(Exception):
@@ -122,7 +124,7 @@ def get_subnet_info(subnet):
 def subnet_exists(vpc_conn, subnet_id):
     filters = {'subnet-id': subnet_id}
     subnet = vpc_conn.get_all_subnets(filters=filters)
-    if subnet[0].state == "available":
+    if subnet and subnet[0].state == "available":
         return subnet[0]
     else:
         return False
@@ -143,7 +145,7 @@ def create_subnet(vpc_conn, vpc_id, cidr, az, check_mode):
         if e.error_code == "DryRunOperation":
             subnet = None
         else:
-          raise AnsibleVPCSubnetCreationException(
+            raise AnsibleVPCSubnetCreationException(
               'Unable to create subnet {0}, error: {1}'.format(cidr, e))
 
     return subnet
@@ -164,7 +166,7 @@ def ensure_tags(vpc_conn, resource_id, tags, add_only, check_mode):
         if to_delete and not add_only:
             vpc_conn.delete_tags(resource_id, to_delete, dry_run=check_mode)
 
-        to_add = dict((k, tags[k]) for k in tags if k not in cur_tags)
+        to_add = dict((k, tags[k]) for k in tags if k not in cur_tags or cur_tags[k] != tags[k])
         if to_add:
             vpc_conn.create_tags(resource_id, to_add, dry_run=check_mode)
 
@@ -242,7 +244,7 @@ def main():
     if region:
         try:
             connection = connect_to_aws(boto.vpc, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")
@@ -265,9 +267,6 @@ def main():
 
     module.exit_json(**result)
 
-from ansible.module_utils.basic import *  # noqa
-from ansible.module_utils.ec2 import *  # noqa
 
 if __name__ == '__main__':
     main()
-

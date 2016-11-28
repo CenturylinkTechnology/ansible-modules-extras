@@ -46,6 +46,18 @@ options:
         description:
             - Zabbix user password.
         required: true
+    http_login_user:
+        description:
+            - Basic Auth login
+        required: false
+        default: None
+        version_added: "2.1"
+    http_login_password:
+        description:
+            - Basic Auth password
+        required: false
+        default: None
+        version_added: "2.1"
     host_name:
         description:
             - Name of the host.
@@ -99,19 +111,14 @@ except ImportError:
 # Extend the ZabbixAPI
 # Since the zabbix-api python module too old (version 1.0, no higher version so far).
 class ZabbixAPIExtends(ZabbixAPI):
-    def __init__(self, server, timeout, **kwargs):
-        ZabbixAPI.__init__(self, server, timeout=timeout)
+    def __init__(self, server, timeout, user, passwd, **kwargs):
+        ZabbixAPI.__init__(self, server, timeout=timeout, user=user, passwd=passwd)
 
 
 class HostMacro(object):
     def __init__(self, module, zbx):
         self._module = module
         self._zapi = zbx
-
-    # exist host
-    def is_host_exist(self, host_name):
-        result = self._zapi.host.exists({'host': host_name})
-        return result
 
     # get host id by host name
     def get_host_id(self, host_name):
@@ -122,7 +129,7 @@ class HostMacro(object):
             else:
                 host_id = host_list[0]['hostid']
                 return host_id
-        except Exception, e:
+        except Exception as e:
             self._module.fail_json(msg="Failed to get the host %s id: %s." % (host_name, e))
 
     # get host macro
@@ -133,7 +140,7 @@ class HostMacro(object):
             if len(host_macro_list) > 0:
                 return host_macro_list[0]
             return None
-        except Exception, e:
+        except Exception as e:
             self._module.fail_json(msg="Failed to get host macro %s: %s" % (macro_name, e))
 
     # create host macro
@@ -143,18 +150,20 @@ class HostMacro(object):
                 self._module.exit_json(changed=True)
             self._zapi.usermacro.create({'hostid': host_id, 'macro': '{$' + macro_name + '}', 'value': macro_value})
             self._module.exit_json(changed=True, result="Successfully added host macro %s " % macro_name)
-        except Exception, e:
+        except Exception as e:
             self._module.fail_json(msg="Failed to create host macro %s: %s" % (macro_name, e))
 
     # update host macro
     def update_host_macro(self, host_macro_obj, macro_name, macro_value):
         host_macro_id = host_macro_obj['hostmacroid']
+        if host_macro_obj['macro'] == '{$'+macro_name+'}' and host_macro_obj['value'] == macro_value:
+            self._module.exit_json(changed=False, result="Host macro %s already up to date" % macro_name)
         try:
             if self._module.check_mode:
                 self._module.exit_json(changed=True)
             self._zapi.usermacro.update({'hostmacroid': host_macro_id, 'value': macro_value})
             self._module.exit_json(changed=True, result="Successfully updated host macro %s " % macro_name)
-        except Exception, e:
+        except Exception as e:
             self._module.fail_json(msg="Failed to updated host macro %s: %s" % (macro_name, e))
 
     # delete host macro
@@ -165,18 +174,20 @@ class HostMacro(object):
                 self._module.exit_json(changed=True)
             self._zapi.usermacro.delete([host_macro_id])
             self._module.exit_json(changed=True, result="Successfully deleted host macro %s " % macro_name)
-        except Exception, e:
+        except Exception as e:
             self._module.fail_json(msg="Failed to delete host macro %s: %s" % (macro_name, e))
 
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-            server_url=dict(required=True, aliases=['url']),
-            login_user=dict(required=True),
-            login_password=dict(required=True, no_log=True),
-            host_name=dict(required=True),
-            macro_name=dict(required=True),
-            macro_value=dict(required=True),
+            server_url=dict(type='str', required=True, aliases=['url']),
+            login_user=dict(type='str', required=True),
+            login_password=dict(type='str', required=True, no_log=True),
+            http_login_user=dict(type='str', required=False, default=None),
+            http_login_password=dict(type='str', required=False, default=None, no_log=True),
+            host_name=dict(type='str', required=True),
+            macro_name=dict(type='str', required=True),
+            macro_value=dict(type='str', required=True),
             state=dict(default="present", choices=['present', 'absent']),
             timeout=dict(type='int', default=10)
         ),
@@ -189,6 +200,8 @@ def main():
     server_url = module.params['server_url']
     login_user = module.params['login_user']
     login_password = module.params['login_password']
+    http_login_user = module.params['http_login_user']
+    http_login_password = module.params['http_login_password']
     host_name = module.params['host_name']
     macro_name  = (module.params['macro_name']).upper()
     macro_value = module.params['macro_value']
@@ -198,9 +211,9 @@ def main():
     zbx = None
     # login to zabbix
     try:
-        zbx = ZabbixAPIExtends(server_url, timeout=timeout)
+        zbx = ZabbixAPIExtends(server_url, timeout=timeout, user=http_login_user, passwd=http_login_password)
         zbx.login(login_user, login_password)
-    except Exception, e:
+    except Exception as e:
         module.fail_json(msg="Failed to connect to Zabbix server: %s" % e)
 
     host_macro_class_obj = HostMacro(module, zbx)

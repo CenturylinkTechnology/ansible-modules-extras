@@ -24,7 +24,7 @@ short_description: Send Amazon Simple Notification Service (SNS) messages
 description:
     - The M(sns) module sends notifications to a topic on your Amazon SNS account
 version_added: 1.6
-author: "Michael J. Schultz (@mjschultz)" 
+author: "Michael J. Schultz (@mjschultz)"
 options:
   msg:
     description:
@@ -61,7 +61,7 @@ options:
     required: false
   aws_secret_key:
     description:
-      - AWS secret key. If not set then the value of the AWS_SECRET_KEY environment variable is used. 
+      - AWS secret key. If not set then the value of the AWS_SECRET_KEY environment variable is used.
     required: false
     default: None
     aliases: ['ec2_secret_key', 'secret_key']
@@ -77,8 +77,8 @@ options:
     required: false
     aliases: ['aws_region', 'ec2_region']
 
-requirements: [ "boto" ]
-author: Michael J. Schultz
+requirements:
+    - "boto"
 """
 
 EXAMPLES = """
@@ -98,10 +98,14 @@ EXAMPLES = """
     topic: "deploy"
 """
 
-import sys
+try:
+    import json
+except ImportError:
+    import simplejson as json
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import ec2_argument_spec, connect_to_aws, get_aws_connection_info
+from ansible.module_utils.pycompat24 import get_exception
 
 try:
     import boto
@@ -157,7 +161,8 @@ def main():
         module.fail_json(msg="region must be specified")
     try:
         connection = connect_to_aws(boto.sns, region, **aws_connect_params)
-    except boto.exception.NoAuthHandlerFound, e:
+    except boto.exception.NoAuthHandlerFound:
+        e = get_exception()
         module.fail_json(msg=str(e))
 
     # .publish() takes full ARN topic id, but I'm lazy and type shortnames
@@ -186,9 +191,11 @@ def main():
     try:
         connection.publish(topic=arn_topic, subject=subject,
                            message_structure='json', message=json_msg)
-    except boto.exception.BotoServerError, e:
+    except boto.exception.BotoServerError:
+        e = get_exception()
         module.fail_json(msg=str(e))
 
     module.exit_json(msg="OK")
 
-main()
+if __name__ == '__main__':
+    main()

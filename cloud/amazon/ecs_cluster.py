@@ -25,7 +25,7 @@ description:
     - Creates or terminates ecs clusters.
 version_added: "2.0"
 author: Mark Chance(@Java1Guy)
-requirements: [ json, time, boto, boto3 ]
+requirements: [ boto, boto3 ]
 options:
     state:
         description:
@@ -45,6 +45,7 @@ options:
             - The number of times to wait for the cluster to have an instance
         required: false
 extends_documentation_fragment:
+    - aws
     - ec2
 '''
 
@@ -100,8 +101,9 @@ status:
     returned: ACTIVE
     type: string
 '''
+import time
+
 try:
-    import json, time
     import boto
     HAS_BOTO = True
 except ImportError:
@@ -112,6 +114,10 @@ try:
     HAS_BOTO3 = True
 except ImportError:
     HAS_BOTO3 = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import boto3_conn, ec2_argument_spec, get_aws_connection_info
+
 
 class EcsClusterManager:
     """Handles ECS Clusters"""
@@ -125,8 +131,8 @@ class EcsClusterManager:
             if not region:
                 module.fail_json(msg="Region must be specified as a parameter, in EC2_REGION or AWS_REGION environment variables or in boto configuration file")
             self.ecs = boto3_conn(module, conn_type='client', resource='ecs', region=region, endpoint=ec2_url, **aws_connect_kwargs)
-        except boto.exception.NoAuthHandlerFound, e:
-            self.module.fail_json(msg="Can't authorize connection - "+str(e))
+        except boto.exception.NoAuthHandlerFound as e:
+            self.module.fail_json(msg="Can't authorize connection - %s" % str(e))
 
     def find_in_array(self, array_of_clusters, cluster_name, field_name='clusterArn'):
         for c in array_of_clusters:
@@ -147,7 +153,7 @@ class EcsClusterManager:
             c = self.find_in_array(response['clusters'], cluster_name)
             if c:
                 return c
-        raise StandardError("Unknown problem describing cluster %s." % cluster_name)
+        raise Exception("Unknown problem describing cluster %s." % cluster_name)
 
     def create_cluster(self, clusterName = 'default'):
         response = self.ecs.create_cluster(clusterName=clusterName)
@@ -170,17 +176,15 @@ def main():
     module = AnsibleModule(argument_spec=argument_spec, supports_check_mode=True, required_together=required_together)
 
     if not HAS_BOTO:
-      module.fail_json(msg='boto is required.')
+        module.fail_json(msg='boto is required.')
 
     if not HAS_BOTO3:
-      module.fail_json(msg='boto3 is required.')
-
-    cluster_name = module.params['name']
+        module.fail_json(msg='boto3 is required.')
 
     cluster_mgr = EcsClusterManager(module)
     try:
         existing = cluster_mgr.describe_cluster(module.params['name'])
-    except Exception, e:
+    except Exception as e:
         module.fail_json(msg="Exception describing cluster '"+module.params['name']+"': "+str(e))
 
     results = dict(changed=False)
@@ -230,9 +234,6 @@ def main():
 
     module.exit_json(**results)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

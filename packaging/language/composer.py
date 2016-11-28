@@ -36,6 +36,12 @@ options:
             - Composer command like "install", "update" and so on
         required: false
         default: install
+    arguments:
+        version_added: "2.0"
+        description:
+            - Composer arguments like required package, version and so on
+        required: false
+        default: null
     working_dir:
         description:
             - Directory of your project ( see --working-dir )
@@ -97,11 +103,24 @@ requirements:
     - composer installed in bin path (recommended /usr/local/bin)
 notes:
     - Default options that are always appended in each execution are --no-ansi, --no-interaction and --no-progress if available.
+    - We received reports about issues on macOS if composer was installed by Homebrew. Please use the official install method to avoid it.
 '''
 
 EXAMPLES = '''
 # Downloads and installs all the libs and dependencies outlined in the /path/to/project/composer.lock
 - composer: command=install working_dir=/path/to/project
+
+- composer:
+    command: "require"
+    arguments: "my/package"
+    working_dir: "/path/to/project"
+
+# Clone project and install with all dependencies
+- composer:
+    command: "create-project"
+    arguments: "package/package /path/to/project ~1.0"
+    working_dir: "/path/to/project"
+    prefer_dist: "yes"
 '''
 
 import os
@@ -110,7 +129,12 @@ import re
 try:
     import json
 except ImportError:
-    import simplejson as json
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
+
 
 def parse_out(string):
     return re.sub("\s+", " ", string).strip()
@@ -128,16 +152,17 @@ def get_available_options(module, command='install'):
     command_help_json = json.loads(out)
     return command_help_json['definition']['options']
 
-def composer_command(module, command, options=[]):
+def composer_command(module, command, arguments = "", options=[]):
     php_path      = module.get_bin_path("php", True, ["/usr/local/bin"])
     composer_path = module.get_bin_path("composer", True, ["/usr/local/bin"])
-    cmd           = "%s %s %s %s" % (php_path, composer_path, command, " ".join(options))
+    cmd           = "%s %s %s %s %s" % (php_path, composer_path, command, " ".join(options), arguments)
     return module.run_command(cmd)
 
 def main():
     module = AnsibleModule(
         argument_spec = dict(
             command              = dict(default="install", type="str", required=False),
+            arguments            = dict(default="", type="str", required=False),
             working_dir          = dict(aliases=["working-dir"], required=True),
             prefer_source        = dict(default="no", type="bool", aliases=["prefer-source"]),
             prefer_dist          = dict(default="no", type="bool", aliases=["prefer-dist"]),
@@ -152,6 +177,10 @@ def main():
 
     # Get composer command with fallback to default
     command = module.params['command']
+    if re.search(r"\s", command):
+        module.fail_json(msg="Use the 'arguments' param for passing arguments with the 'command'")
+
+    arguments = module.params['arguments']
     available_options = get_available_options(module=module, command=command)
 
     options = []
@@ -188,15 +217,15 @@ def main():
     if module.check_mode:
         options.append('--dry-run')
 
-    rc, out, err = composer_command(module, command, options)
+    rc, out, err = composer_command(module, command, arguments, options)
 
     if rc != 0:
         output = parse_out(err)
-        module.fail_json(msg=output)
+        module.fail_json(msg=output, stdout=err)
     else:
         # Composer version > 1.0.0-alpha9 now use stderr for standard notification messages
         output = parse_out(out + err)
-        module.exit_json(changed=has_changed(output), msg=output)
+        module.exit_json(changed=has_changed(output), msg=output, stdout=out+err)
 
 # import module snippets
 from ansible.module_utils.basic import *

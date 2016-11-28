@@ -40,6 +40,11 @@ options:
         required: true
         description:
             - Name of port to manage on the bridge
+    tag:
+        version_added: 2.2
+        required: false
+        description:
+            - VLAN tag for this port
     state:
         required: false
         default: "present"
@@ -71,15 +76,19 @@ EXAMPLES = '''
 
 # Creates port eth6 and set ofport equal to 6.
 - openvswitch_port: bridge=bridge-loop port=eth6 state=present
-                    set Interface eth6 ofport_request=6
+                    set="Interface eth6 ofport_request=6"
 
-# Assign interface id server1-vifeth6 and mac address 52:54:00:30:6d:11
+# Creates port vlan10 with tag 10 on bridge br-ex
+- openvswitch_port: bridge=br-ex port=vlan10 tag=10 state=present
+                    set="Interface vlan10 type=internal"
+
+# Assign interface id server1-vifeth6 and mac address 00:00:5E:00:53:23
 # to port vifeth6 and setup port to be managed by a controller.
 - openvswitch_port: bridge=br-int port=vifeth6 state=present
   args:
     external_ids:
       iface-id: "{{inventory_hostname}}-vifeth6"
-      attached-mac: "52:54:00:30:6d:11"
+      attached-mac: "00:00:5E:00:53:23"
       vm-id: "{{inventory_hostname}}"
       iface-status: "active"
 '''
@@ -118,6 +127,7 @@ class OVSPort(object):
         self.module = module
         self.bridge = module.params['bridge']
         self.port = module.params['port']
+        self.tag = module.params['tag']
         self.state = module.params['state']
         self.timeout = module.params['timeout']
         self.set_opt = module.params.get('set', None)
@@ -140,7 +150,7 @@ class OVSPort(object):
 
     def set(self, set_opt):
         """ Set attributes on a port. """
-        self.module("set called %s" % set_opt)
+        self.module.log("set called %s" % set_opt)
         if (not set_opt):
             return False
 
@@ -167,6 +177,8 @@ class OVSPort(object):
     def add(self):
         '''Add the port'''
         cmd = ['add-port', self.bridge, self.port]
+        if self.tag:
+            cmd += ["tag=" + self.tag]
         if self.set and self.set_opt:
             cmd += ["--", "set"]
             cmd += self.set_opt.split(" ")
@@ -192,7 +204,8 @@ class OVSPort(object):
                 changed = True
             else:
                 changed = False
-        except Exception, earg:
+        except Exception:
+            earg = get_exception()
             self.module.fail_json(msg=str(earg))
         self.module.exit_json(changed=changed)
 
@@ -223,7 +236,8 @@ class OVSPort(object):
                         external_id = fmt_opt % (self.port, key, value)
                         changed = self.set(external_id) or changed
                 ##
-        except Exception, earg:
+        except Exception:
+            earg = get_exception()
             self.module.fail_json(msg=str(earg))
         self.module.exit_json(changed=changed)
 
@@ -235,10 +249,11 @@ def main():
         argument_spec={
             'bridge': {'required': True},
             'port': {'required': True},
+            'tag': {'required': False},
             'state': {'default': 'present', 'choices': ['present', 'absent']},
             'timeout': {'default': 5, 'type': 'int'},
             'set': {'required': False, 'default': None},
-            'external_ids': {'default': {}, 'required': False},
+            'external_ids': {'default': {}, 'required': False, 'type': 'dict'},
         },
         supports_check_mode=True,
     )
@@ -256,4 +271,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 main()

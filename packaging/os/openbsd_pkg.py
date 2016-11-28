@@ -18,8 +18,13 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+import os
+import platform
 import re
 import shlex
+import sqlite3
+
+from distutils.version import StrictVersion
 
 DOCUMENTATION = '''
 ---
@@ -29,6 +34,7 @@ version_added: "1.1"
 short_description: Manage packages on OpenBSD.
 description:
     - Manage packages on OpenBSD using the pkg tools.
+requirements: [ "python >= 2.5" ]
 options:
     name:
         required: true
@@ -41,6 +47,23 @@ options:
           - C(present) will make sure the package is installed.
             C(latest) will make sure the latest version of the package is installed.
             C(absent) will make sure the specified package is not installed.
+    build:
+        required: false
+        choices: [ yes, no ]
+        default: no
+        description:
+          - Build the package from source instead of downloading and installing
+            a binary. Requires that the port source tree is already installed.
+            Automatically builds and installs the 'sqlports' package, if it is
+            not already installed.
+        version_added: "2.1"
+    ports_dir:
+        required: false
+        default: /usr/ports
+        description:
+          - When used in combination with the 'build' option, allows overriding
+            the default ports source directory.
+        version_added: "2.1"
 '''
 
 EXAMPLES = '''
@@ -53,11 +76,17 @@ EXAMPLES = '''
 # Make sure nmap is not installed
 - openbsd_pkg: name=nmap state=absent
 
+# Make sure nmap is installed, build it from source if it is not
+- openbsd_pkg: name=nmap state=present build=yes
+
 # Specify a pkg flavour with '--'
-- openbsd_pkg: name=vim--nox11 state=present
+- openbsd_pkg: name=vim--no_x11 state=present
 
 # Specify the default flavour to avoid ambiguity errors
 - openbsd_pkg: name=vim-- state=present
+
+# Specify a package branch (requires at least OpenBSD 6.0)
+- openbsd_pkg: name=python%3.5 state=present
 
 # Update all packages on the system
 - openbsd_pkg: name=* state=latest
@@ -71,70 +100,69 @@ def execute_command(cmd, module):
     cmd_args = shlex.split(cmd)
     return module.run_command(cmd_args)
 
-# Function used for getting the name of a currently installed package.
-def get_current_name(name, pkg_spec, module):
-    info_cmd = 'pkg_info'
-    (rc, stdout, stderr) = execute_command("%s" % (info_cmd), module)
-    if rc != 0:
-        return (rc, stdout, stderr)
-
-    if pkg_spec['version']:
-        pattern = "^%s" % name
-    elif pkg_spec['flavor']:
-        pattern = "^%s-.*-%s\s" % (pkg_spec['stem'], pkg_spec['flavor'])
-    else:
-        pattern = "^%s-" % pkg_spec['stem']
-
-    module.debug("get_current_name(): pattern = %s" % pattern)
-
-    for line in stdout.splitlines():
-        module.debug("get_current_name: line = %s" % line)
-        match = re.search(pattern, line)
-        if match:
-            current_name = line.split()[0]
-
-    return current_name
-
 # Function used to find out if a package is currently installed.
 def get_package_state(name, pkg_spec, module):
-    info_cmd = 'pkg_info -e'
+    info_cmd = 'pkg_info -Iq'
 
-    if pkg_spec['version']:
-        command = "%s %s" % (info_cmd, name)
-    elif pkg_spec['flavor']:
-        command = "%s %s-*-%s" % (info_cmd, pkg_spec['stem'], pkg_spec['flavor'])
-    else:
-        command = "%s %s-*" % (info_cmd, pkg_spec['stem'])
+    command = "%s inst:%s" % (info_cmd, name)
 
     rc, stdout, stderr = execute_command(command, module)
 
-    if (stderr):
+    if stderr:
         module.fail_json(msg="failed in get_package_state(): " + stderr)
 
-    if rc == 0:
+    if stdout:
+        # If the requested package name is just a stem, like "python", we may
+        # find multiple packages with that name.
+        pkg_spec['installed_names'] = [name for name in stdout.splitlines()]
+        module.debug("get_package_state(): installed_names = %s" % pkg_spec['installed_names'])
         return True
     else:
         return False
 
 # Function used to make sure a package is present.
 def package_present(name, installed_state, pkg_spec, module):
+    build = module.params['build']
+
     if module.check_mode:
         install_cmd = 'pkg_add -Imn'
     else:
-        install_cmd = 'pkg_add -Im'
+        if build is True:
+            port_dir = "%s/%s" % (module.params['ports_dir'], get_package_source_path(name, pkg_spec, module))
+            if os.path.isdir(port_dir):
+                if pkg_spec['flavor']:
+                    flavors = pkg_spec['flavor'].replace('-', ' ')
+                    install_cmd = "cd %s && make clean=depends && FLAVOR=\"%s\" make install && make clean=depends" % (port_dir, flavors)
+                elif pkg_spec['subpackage']:
+                    install_cmd = "cd %s && make clean=depends && SUBPACKAGE=\"%s\" make install && make clean=depends" % (port_dir, pkg_spec['subpackage'])
+                else:
+                    install_cmd = "cd %s && make install && make clean=depends" % (port_dir)
+            else:
+                module.fail_json(msg="the port source directory %s does not exist" % (port_dir))
+        else:
+            install_cmd = 'pkg_add -Im'
 
     if installed_state is False:
 
         # Attempt to install the package
-        (rc, stdout, stderr) = execute_command("%s %s" % (install_cmd, name), module)
+        if build is True and not module.check_mode:
+            (rc, stdout, stderr) = module.run_command(install_cmd, module, use_unsafe_shell=True)
+        else:
+            (rc, stdout, stderr) = execute_command("%s %s" % (install_cmd, name), module)
 
         # The behaviour of pkg_add is a bit different depending on if a
         # specific version is supplied or not.
         #
         # When a specific version is supplied the return code will be 0 when
-        # a package is found and 1 when it is not, if a version is not
-        # supplied the tool will exit 0 in both cases:
-        if pkg_spec['version']:
+        # a package is found and 1 when it is not. If a version is not
+        # supplied the tool will exit 0 in both cases.
+        #
+        # It is important to note that "version" relates to the
+        # packages-specs(7) notion of a version. If using the branch syntax
+        # (like "python%3.5") the version number is considered part of the
+        # stem, and the pkg_add behavior behaves the same as if the name did
+        # not contain a version (which it strictly speaking does not).
+        if pkg_spec['version'] or build is True:
             # Depend on the return code.
             module.debug("package_present(): depending on return code")
             if rc:
@@ -148,11 +176,14 @@ def package_present(name, installed_state, pkg_spec, module):
                 # "file:/local/package/directory/ is empty" message on stderr
                 # while still installing the package, so we need to look for
                 # for a message like "packagename-1.0: ok" just in case.
-                match = re.search("\W%s-[^:]+: ok\W" % name, stdout)
+                if pkg_spec['style'] == 'branch':
+                    match = re.search("\W%s-[^:]+: ok\W" % pkg_spec['pkgname'], stdout)
+                else:
+                    match = re.search("\W%s-[^:]+: ok\W" % name, stdout)
+
                 if match:
                     # It turns out we were able to install the package.
-                    module.debug("package_present(): we were able to install package")
-                    pass
+                    module.debug("package_present(): we were able to install the package")
                 else:
                     # We really did fail, fake the return code.
                     module.debug("package_present(): we really did fail")
@@ -177,6 +208,10 @@ def package_present(name, installed_state, pkg_spec, module):
 
 # Function used to make sure a package is the latest available version.
 def package_latest(name, installed_state, pkg_spec, module):
+
+    if module.params['build'] is True:
+        module.fail_json(msg="the combination of build=%s and state=latest is not supported" % module.params['build'])
+
     if module.check_mode:
         upgrade_cmd = 'pkg_add -umn'
     else:
@@ -186,25 +221,23 @@ def package_latest(name, installed_state, pkg_spec, module):
 
     if installed_state is True:
 
-        # Fetch name of currently installed package.
-        pre_upgrade_name = get_current_name(name, pkg_spec, module)
-
-        module.debug("package_latest(): pre_upgrade_name = %s" % pre_upgrade_name)
-
         # Attempt to upgrade the package.
         (rc, stdout, stderr) = execute_command("%s %s" % (upgrade_cmd, name), module)
 
         # Look for output looking something like "nmap-6.01->6.25: ok" to see if
         # something changed (or would have changed). Use \W to delimit the match
         # from progress meter output.
-        match = re.search("\W%s->.+: ok\W" % pre_upgrade_name, stdout)
-        if match:
-            if module.check_mode:
-                module.exit_json(changed=True)
+        changed = False
+        for installed_name in pkg_spec['installed_names']:
+            module.debug("package_latest(): checking for pre-upgrade package name: %s" % installed_name)
+            match = re.search("\W%s->.+: ok\W" % installed_name, stdout)
+            if match:
+                module.debug("package_latest(): pre-upgrade package name match: %s" % installed_name)
+                if module.check_mode:
+                    module.exit_json(changed=True)
 
-            changed = True
-        else:
-            changed = False
+                changed = True
+                break
 
         # FIXME: This part is problematic. Based on the issues mentioned (and
         # handled) in package_present() it is not safe to blindly trust stderr
@@ -256,7 +289,12 @@ def package_absent(name, installed_state, module):
 
 # Function used to parse the package name based on packages-specs(7).
 # The general name structure is "stem-version[-flavors]".
+#
+# Names containing "%" are a special variation not part of the
+# packages-specs(7) syntax. See pkg_add(1) on OpenBSD 6.0 or later for a
+# description.
 def parse_package_name(name, pkg_spec, module):
+    module.debug("parse_package_name(): parsing name: %s" % name)
     # Do some initial matches so we can base the more advanced regex on that.
     version_match = re.search("-[0-9]", name)
     versionless_match = re.search("--", name)
@@ -264,7 +302,7 @@ def parse_package_name(name, pkg_spec, module):
     # Stop if someone is giving us a name that both has a version and is
     # version-less at the same time.
     if version_match and versionless_match:
-        module.fail_json(msg="Package name both has a version and is version-less: " + name)
+        module.fail_json(msg="package name both has a version and is version-less: " + name)
 
     # If name includes a version.
     if version_match:
@@ -275,8 +313,9 @@ def parse_package_name(name, pkg_spec, module):
             pkg_spec['version']           = match.group('version')
             pkg_spec['flavor_separator']  = match.group('flavor_separator')
             pkg_spec['flavor']            = match.group('flavor')
+            pkg_spec['style']             = 'version'
         else:
-            module.fail_json(msg="Unable to parse package name at version_match: " + name)
+            module.fail_json(msg="unable to parse package name at version_match: " + name)
 
     # If name includes no version but is version-less ("--").
     elif versionless_match:
@@ -287,8 +326,9 @@ def parse_package_name(name, pkg_spec, module):
             pkg_spec['version']           = None
             pkg_spec['flavor_separator']  = '-'
             pkg_spec['flavor']            = match.group('flavor')
+            pkg_spec['style']             = 'versionless'
         else:
-            module.fail_json(msg="Unable to parse package name at versionless_match: " + name)
+            module.fail_json(msg="unable to parse package name at versionless_match: " + name)
 
     # If name includes no version, and is not version-less, it is all a stem.
     else:
@@ -299,15 +339,83 @@ def parse_package_name(name, pkg_spec, module):
             pkg_spec['version']           = None
             pkg_spec['flavor_separator']  = None
             pkg_spec['flavor']            = None
+            pkg_spec['style']             = 'stem'
         else:
-            module.fail_json(msg="Unable to parse package name at else: " + name)
+            module.fail_json(msg="unable to parse package name at else: " + name)
+
+    # If the stem contains an "%" then it needs special treatment.
+    branch_match = re.search("%", pkg_spec['stem'])
+    if branch_match:
+
+        branch_release = "6.0"
+
+        if version_match or versionless_match:
+            module.fail_json(msg="package name using 'branch' syntax also has a version or is version-less: " + name)
+        if StrictVersion(platform.release()) < StrictVersion(branch_release):
+            module.fail_json(msg="package name using 'branch' syntax requires at least OpenBSD %s: %s" % (branch_release, name))
+
+        pkg_spec['style'] = 'branch'
+
+        # Key names from description in pkg_add(1).
+        pkg_spec['pkgname'] = pkg_spec['stem'].split('%')[0]
+        pkg_spec['branch'] = pkg_spec['stem'].split('%')[1]
 
     # Sanity check that there are no trailing dashes in flavor.
     # Try to stop strange stuff early so we can be strict later.
     if pkg_spec['flavor']:
         match = re.search("-$", pkg_spec['flavor'])
         if match:
-            module.fail_json(msg="Trailing dash in flavor: " + pkg_spec['flavor'])
+            module.fail_json(msg="trailing dash in flavor: " + pkg_spec['flavor'])
+
+# Function used for figuring out the port path.
+def get_package_source_path(name, pkg_spec, module):
+    pkg_spec['subpackage'] = None
+    if pkg_spec['stem'] == 'sqlports':
+        return 'databases/sqlports'
+    else:
+        # try for an exact match first
+        sqlports_db_file = '/usr/local/share/sqlports'
+        if not os.path.isfile(sqlports_db_file):
+            module.fail_json(msg="sqlports file '%s' is missing" % sqlports_db_file)
+
+        conn = sqlite3.connect(sqlports_db_file)
+        first_part_of_query = 'SELECT fullpkgpath, fullpkgname FROM ports WHERE fullpkgname'
+        query = first_part_of_query + ' = ?'
+        module.debug("package_package_source_path(): exact query: %s" % query)
+        cursor = conn.execute(query, (name,))
+        results = cursor.fetchall()
+
+        # next, try for a fuzzier match
+        if len(results) < 1:
+            looking_for = pkg_spec['stem'] + (pkg_spec['version_separator'] or '-') + (pkg_spec['version'] or '%')
+            query = first_part_of_query + ' LIKE ?'
+            if pkg_spec['flavor']:
+                looking_for += pkg_spec['flavor_separator'] + pkg_spec['flavor']
+                module.debug("package_package_source_path(): fuzzy flavor query: %s" % query)
+                cursor = conn.execute(query, (looking_for,))
+            elif pkg_spec['style'] == 'versionless':
+                query += ' AND fullpkgname NOT LIKE ?'
+                module.debug("package_package_source_path(): fuzzy versionless query: %s" % query)
+                cursor = conn.execute(query, (looking_for, "%s-%%" % looking_for,))
+            else:
+                module.debug("package_package_source_path(): fuzzy query: %s" % query)
+                cursor = conn.execute(query, (looking_for,))
+            results = cursor.fetchall()
+
+        # error if we don't find exactly 1 match
+        conn.close()
+        if len(results) < 1:
+            module.fail_json(msg="could not find a port by the name '%s'" % name)
+        if len(results) > 1:
+            matches = map(lambda x:x[1], results)
+            module.fail_json(msg="too many matches, unsure which to build: %s" % ' OR '.join(matches))
+
+        # there's exactly 1 match, so figure out the subpackage, if any, then return
+        fullpkgpath = results[0][0]
+        parts = fullpkgpath.split(',')
+        if len(parts) > 1 and parts[1][0] == '-':
+            pkg_spec['subpackage'] = parts[1]
+        return parts[0]
 
 # Function used for upgrading all installed packages.
 def upgrade_packages(module):
@@ -348,12 +456,16 @@ def main():
         argument_spec = dict(
             name = dict(required=True),
             state = dict(required=True, choices=['absent', 'installed', 'latest', 'present', 'removed']),
+            build = dict(default='no', type='bool'),
+            ports_dir = dict(default='/usr/ports'),
         ),
         supports_check_mode = True
     )
 
     name      = module.params['name']
     state     = module.params['state']
+    build     = module.params['build']
+    ports_dir = module.params['ports_dir']
 
     rc = 0
     stdout = ''
@@ -361,6 +473,19 @@ def main():
     result = {}
     result['name'] = name
     result['state'] = state
+    result['build'] = build
+
+    if build is True:
+        if not os.path.isdir(ports_dir):
+            module.fail_json(msg="the ports source directory %s does not exist" % (ports_dir))
+
+        # build sqlports if its not installed yet
+        pkg_spec = {}
+        parse_package_name('sqlports', pkg_spec, module)
+        installed_state = get_package_state('sqlports', pkg_spec, module)
+        if not installed_state:
+            module.debug("main(): installing 'sqlports' because build=%s" % module.params['build'])
+            package_present('sqlports', installed_state, pkg_spec, module)
 
     if name == '*':
         if state != 'latest':
@@ -372,6 +497,11 @@ def main():
         # Parse package name and put results in the pkg_spec dictionary.
         pkg_spec = {}
         parse_package_name(name, pkg_spec, module)
+
+        # Not sure how the branch syntax is supposed to play together
+        # with build mode. Disable it for now.
+        if pkg_spec['style'] == 'branch' and module.params['build'] is True:
+            module.fail_json(msg="the combination of 'branch' syntax and build=%s is not supported: %s" % (module.params['build'], name))
 
         # Get package state.
         installed_state = get_package_state(name, pkg_spec, module)

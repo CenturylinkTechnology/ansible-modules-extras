@@ -19,7 +19,7 @@ module: ec2_vpc_subnet_facts
 short_description: Gather facts about ec2 VPC subnets in AWS
 description:
     - Gather facts about ec2 VPC subnets in AWS
-version_added: "2.0"
+version_added: "2.1"
 author: "Rob White (@wimnat)"
 options:
   filters:
@@ -53,6 +53,21 @@ EXAMPLES = '''
     filters:
       vpc-id: vpc-abcdef00
 
+# Gather facts about a set of VPC subnets, publicA, publicB and publicC within a
+# VPC with ID vpc-abcdef00 and then use the jinja map function to return the
+# subnet_ids as a list.
+
+- ec2_vpc_subnet_facts:
+    filters:
+      vpc-id: vpc-abcdef00
+      "tag:Name": "{{ item }}"
+  with_items:
+    - publicA
+    - publicB
+    - publicC
+
+- set_fact:
+    subnet_ids: "{{ subnet_facts.results|map(attribute='subnets.0.id')|list }}"
 '''
 
 try:
@@ -61,6 +76,10 @@ try:
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import AnsibleAWSError, connect_to_aws, ec2_argument_spec, get_aws_connection_info
+
 
 def get_subnet_info(subnet):
 
@@ -111,15 +130,13 @@ def main():
     if region:
         try:
             connection = connect_to_aws(boto.vpc, region, **aws_connect_params)
-        except (boto.exception.NoAuthHandlerFound, StandardError), e:
+        except (boto.exception.NoAuthHandlerFound, AnsibleAWSError) as e:
             module.fail_json(msg=str(e))
     else:
         module.fail_json(msg="region must be specified")
 
     list_ec2_vpc_subnets(connection, module)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

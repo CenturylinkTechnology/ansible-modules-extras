@@ -181,12 +181,6 @@ end_port:
   sample: 80
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -309,14 +303,16 @@ class AnsibleCloudStackSecurityGroupRule(AnsibleCloudStack):
         res  = None
         sg_type = self.module.params.get('type')
         if sg_type == 'ingress':
-            rule = self._get_rule(security_group['ingressrule'])
+            if 'ingressrule' in security_group:
+                rule = self._get_rule(security_group['ingressrule'])
             if not rule:
                 self.result['changed'] = True
                 if not self.module.check_mode:
                     res = self.cs.authorizeSecurityGroupIngress(**args)
 
         elif sg_type == 'egress':
-            rule = self._get_rule(security_group['egressrule'])
+            if 'egressrule' in security_group:
+                rule = self._get_rule(security_group['egressrule'])
             if not rule:
                 self.result['changed'] = True
                 if not self.module.check_mode:
@@ -327,7 +323,7 @@ class AnsibleCloudStackSecurityGroupRule(AnsibleCloudStack):
 
         poll_async = self.module.params.get('poll_async')
         if res and poll_async:
-            security_group = self._poll_job(res, 'securitygroup')
+            security_group = self.poll_job(res, 'securitygroup')
             key = sg_type + "rule" # ingressrule / egressrule
             if key in security_group:
                 rule = security_group[key][0]
@@ -358,7 +354,7 @@ class AnsibleCloudStackSecurityGroupRule(AnsibleCloudStack):
 
         poll_async = self.module.params.get('poll_async')
         if res and poll_async:
-            res = self._poll_job(res, 'securitygroup')
+            res = self.poll_job(res, 'securitygroup')
         return rule
 
 
@@ -384,7 +380,7 @@ def main():
         end_port = dict(type='int', default=None),
         state = dict(choices=['present', 'absent'], default='present'),
         project = dict(default=None),
-        poll_async = dict(choices=BOOLEANS, default=True),
+        poll_async = dict(type='bool', default=True),
     ))
     required_together = cs_required_together()
     required_together.extend([
@@ -403,9 +399,6 @@ def main():
         supports_check_mode=True
     )
 
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
-
     try:
         acs_sg_rule = AnsibleCloudStackSecurityGroupRule(module)
 
@@ -417,7 +410,7 @@ def main():
 
         result = acs_sg_rule.get_result(sg_rule)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

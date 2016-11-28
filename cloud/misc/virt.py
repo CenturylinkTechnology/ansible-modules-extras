@@ -84,6 +84,23 @@ tasks:
     virt: name=foo state=running uri=lxc:///
 '''
 
+RETURN = '''
+# for list_vms command
+list_vms: 
+    description: The list of vms defined on the remote system
+    type: dictionary
+    returned: success
+    sample: [
+        "build.example.org", 
+        "dev.example.org"
+    ]
+# for status command
+status:
+    description: The status of the VM, among running, crashed, paused and shutdown
+    type: string
+    sample: "success"
+    returned: success
+'''
 VIRT_FAILED = 1
 VIRT_SUCCESS = 0
 VIRT_UNAVAILABLE=2
@@ -128,6 +145,9 @@ class LibvirtConnection(object):
 
         if "xen" in stdout:
             conn = libvirt.open(None)
+        elif "esx" in uri:
+            auth = [[libvirt.VIR_CRED_AUTHNAME, libvirt.VIR_CRED_NOECHOPROMPT], [], None]
+            conn = libvirt.openAuth(uri, auth)
         else:
             conn = libvirt.open(uri)
 
@@ -410,7 +430,7 @@ def core(module):
 
     if state and command=='list_vms':
         res = v.list_vms(state=state)
-        if type(res) != dict:
+        if not isinstance(res, dict):
             res = { command: res }
         return VIRT_SUCCESS, res
 
@@ -457,13 +477,13 @@ def core(module):
                     res = {'changed': True, 'created': guest}
                 return VIRT_SUCCESS, res
             res = getattr(v, command)(guest)
-            if type(res) != dict:
+            if not isinstance(res, dict):
                 res = { command: res }
             return VIRT_SUCCESS, res
 
         elif hasattr(v, command):
             res = getattr(v, command)()
-            if type(res) != dict:
+            if not isinstance(res, dict):
                 res = { command: res }
             return VIRT_SUCCESS, res
 
@@ -490,7 +510,8 @@ def main():
     rc = VIRT_SUCCESS
     try:
         rc, result = core(module)
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg=str(e))
 
     if rc != 0: # something went wrong emit the msg
@@ -501,4 +522,5 @@ def main():
 
 # import module snippets
 from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 main()

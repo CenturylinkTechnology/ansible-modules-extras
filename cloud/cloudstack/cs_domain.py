@@ -106,12 +106,6 @@ network_domain:
   sample: example.local
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -207,7 +201,7 @@ class AnsibleCloudStackDomain(AnsibleCloudStack):
         args['id']              = domain['id']
         args['networkdomain']   = self.module.params.get('network_domain')
 
-        if self._has_changed(args, domain):
+        if self.has_changed(args, domain):
             self.result['changed'] = True
             if not self.module.check_mode:
                 res = self.cs.updateDomain(**args)
@@ -233,7 +227,7 @@ class AnsibleCloudStackDomain(AnsibleCloudStack):
 
                 poll_async = self.module.params.get('poll_async')
                 if poll_async:
-                    res = self._poll_job(res, 'domain')
+                    res = self.poll_job(res, 'domain')
         return domain
 
 
@@ -244,8 +238,8 @@ def main():
         path = dict(required=True),
         state = dict(choices=['present', 'absent'], default='present'),
         network_domain = dict(default=None),
-        clean_up = dict(choices=BOOLEANS, default=False),
-        poll_async = dict(choices=BOOLEANS, default=True),
+        clean_up = dict(type='bool', default=False),
+        poll_async = dict(type='bool', default=True),
     ))
 
     module = AnsibleModule(
@@ -253,9 +247,6 @@ def main():
         required_together=cs_required_together(),
         supports_check_mode=True
     )
-
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
 
     try:
         acs_dom = AnsibleCloudStackDomain(module)
@@ -268,7 +259,7 @@ def main():
 
         result = acs_dom.get_result(domain)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

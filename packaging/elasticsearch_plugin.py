@@ -33,17 +33,17 @@ author: Mathew Davies (@ThePixelDeveloper)
 options:
     name:
         description:
-            - Name of the plugin to install
+            - Name of the plugin to install. In ES 2.x, the name can be an url or file location
         required: True
     state:
         description:
             - Desired state of a plugin.
         required: False
-        choices: [present, absent]
+        choices: ["present", "absent"]
         default: present
     url:
         description:
-            - Set exact URL to download the plugin from
+            - Set exact URL to download the plugin from (Only works for ES 1.x)
         required: False
         default: None
     timeout:
@@ -61,6 +61,18 @@ options:
             - Your configured plugin directory specified in Elasticsearch
         required: False
         default: /usr/share/elasticsearch/plugins/
+    proxy_host:
+        description:
+            - Proxy host to use during plugin installation
+        required: False
+        default: None
+        version_added: "2.1"
+    proxy_port:
+        description:
+            - Proxy port to use during plugin installation
+        required: False
+        default: None
+        version_added: "2.1"
     version:
         description:
             - Version of the plugin to be installed.
@@ -80,6 +92,10 @@ EXAMPLES = '''
 - elasticsearch_plugin: state=absent name="mobz/elasticsearch-head"
 '''
 
+PACKAGE_STATE_MAP = dict(
+    present="install",
+    absent="remove"
+)
 
 def parse_plugin_repo(string):
     elements = string.split("/")
@@ -99,53 +115,24 @@ def parse_plugin_repo(string):
 
     return repo
 
-
 def is_plugin_present(plugin_dir, working_dir):
     return os.path.isdir(os.path.join(working_dir, plugin_dir))
 
-
 def parse_error(string):
     reason = "reason: "
-    return string[string.index(reason) + len(reason):].strip()
+    try:
+        return string[string.index(reason) + len(reason):].strip()
+    except ValueError:
+        return string
 
+def install_plugin(module, plugin_bin, plugin_name, version, url, proxy_host, proxy_port, timeout):
+    cmd_args = [plugin_bin, PACKAGE_STATE_MAP["present"], plugin_name]
 
-def main():
+    if version:
+        name = name + '/' + version
 
-    package_state_map = dict(
-        present="--install",
-        absent="--remove"
-    )
-
-    module = AnsibleModule(
-        argument_spec=dict(
-            name=dict(required=True),
-            state=dict(default="present", choices=package_state_map.keys()),
-            url=dict(default=None),
-            timeout=dict(default="1m"),
-            plugin_bin=dict(default="/usr/share/elasticsearch/bin/plugin"),
-            plugin_dir=dict(default="/usr/share/elasticsearch/plugins/"),
-            version=dict(default=None)
-        )
-    )
-
-    plugin_bin = module.params["plugin_bin"]
-    plugin_dir = module.params["plugin_dir"]
-    name = module.params["name"]
-    state = module.params["state"]
-    url = module.params["url"]
-    timeout = module.params["timeout"]
-    version = module.params["version"]
-
-    present = is_plugin_present(parse_plugin_repo(name), plugin_dir)
-
-    # skip if the state is correct
-    if (present and state == "present") or (state == "absent" and not present):
-        module.exit_json(changed=False, name=name)
-
-    if (version):
-       name = name + '/' + version
-
-    cmd_args = [plugin_bin, package_state_map[state], name]
+    if proxy_host and proxy_port:
+        cmd_args.append("-DproxyHost=%s -DproxyPort=%s" % (proxy_host, proxy_port))
 
     if url:
         cmd_args.append("--url %s" % url)
@@ -155,14 +142,74 @@ def main():
 
     cmd = " ".join(cmd_args)
 
-    rc, out, err = module.run_command(cmd)
+    if module.check_mode:
+        rc, out, err = 0, "check mode", ""
+    else:
+        rc, out, err = module.run_command(cmd)
 
     if rc != 0:
         reason = parse_error(out)
         module.fail_json(msg=reason)
+    
+    return True, cmd, out, err
 
-    module.exit_json(changed=True, cmd=cmd, name=name, state=state, url=url, timeout=timeout, stdout=out, stderr=err)
+def remove_plugin(module, plugin_bin, plugin_name):
+    cmd_args = [plugin_bin, PACKAGE_STATE_MAP["absent"], parse_plugin_repo(plugin_name)]
+
+    cmd = " ".join(cmd_args)
+
+    if module.check_mode:
+        rc, out, err = 0, "check mode", ""
+    else:
+        rc, out, err = module.run_command(cmd)
+
+    if rc != 0:
+        reason = parse_error(out)
+        module.fail_json(msg=reason)
+    
+    return True, cmd, out, err
+
+def main():
+    module = AnsibleModule(
+        argument_spec=dict(
+            name=dict(required=True),
+            state=dict(default="present", choices=PACKAGE_STATE_MAP.keys()),
+            url=dict(default=None),
+            timeout=dict(default="1m"),
+            plugin_bin=dict(default="/usr/share/elasticsearch/bin/plugin", type="path"),
+            plugin_dir=dict(default="/usr/share/elasticsearch/plugins/", type="path"),
+            proxy_host=dict(default=None),
+            proxy_port=dict(default=None),
+            version=dict(default=None)
+        ),
+        supports_check_mode=True
+    )
+
+    name        = module.params["name"]
+    state       = module.params["state"]
+    url         = module.params["url"]
+    timeout     = module.params["timeout"]
+    plugin_bin  = module.params["plugin_bin"]
+    plugin_dir  = module.params["plugin_dir"]
+    proxy_host  = module.params["proxy_host"]
+    proxy_port  = module.params["proxy_port"]
+    version     = module.params["version"]
+
+    present = is_plugin_present(parse_plugin_repo(name), plugin_dir)
+
+    # skip if the state is correct
+    if (present and state == "present") or (state == "absent" and not present):
+        module.exit_json(changed=False, name=name, state=state)
+
+    if state == "present":
+        changed, cmd, out, err = install_plugin(module, plugin_bin, name, version, url, proxy_host, proxy_port, timeout)
+
+    elif state == "absent":
+        changed, cmd, out, err = remove_plugin(module, plugin_bin, name)
+
+    module.exit_json(changed=changed, cmd=cmd, name=name, state=state, url=url, timeout=timeout, stdout=out, stderr=err)
 
 from ansible.module_utils.basic import *
 
-main()
+if __name__ == '__main__':
+    main()

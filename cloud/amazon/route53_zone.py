@@ -52,7 +52,70 @@ extends_documentation_fragment:
 author: "Christopher Troup (@minichate)"
 '''
 
-import time
+EXAMPLES = '''
+# create a public zone
+- route53_zone:
+    zone: example.com
+    state: present
+    comment: this is an example
+
+# delete a public zone
+- route53_zone:
+    zone: example.com
+    state: absent
+
+- name: private zone for devel
+  route53_zone:
+    zone: devel.example.com
+    state: present
+    vpc_id: '{{ myvpc_id }}'
+    comment: developer domain
+
+# more complex example
+- name: register output after creating zone in parameterized region
+  route53_zone:
+    vpc_id: '{{ vpc.vpc_id }}'
+    vpc_region: '{{ ec2_region }}'
+    zone: '{{ vpc_dns_zone }}'
+    state: present
+    register: zone_out
+
+- debug:
+    var: zone_out
+'''
+
+RETURN='''
+comment:
+    description: optional hosted zone comment
+    returned: when hosted zone exists
+    type: string
+    sample: "Private zone"
+name:
+    description: hosted zone name
+    returned: when hosted zone exists
+    type: string
+    sample: "private.local."
+private_zone:
+    description: whether hosted zone is private or public
+    returned: when hosted zone exists
+    type: bool
+    sample: true
+vpc_id:
+    description: id of vpc attached to private hosted zone
+    returned: for private hosted zone
+    type: string
+    sample: "vpc-1d36c84f"
+vpc_region:
+    description: region of vpc attached to private hosted zone
+    returned: for private hosted zone
+    type: string
+    sample: "eu-west-1"
+zone_id:
+    description: hosted zone id
+    returned: when hosted zone exists
+    type: string
+    sample: "Z6JQG9820BEFMW"
+'''
 
 try:
     import boto
@@ -63,6 +126,9 @@ try:
     HAS_BOTO = True
 except ImportError:
     HAS_BOTO = False
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import ec2_argument_spec, get_aws_connection_info
 
 
 def main():
@@ -94,7 +160,7 @@ def main():
     # connect to the route53 endpoint
     try:
         conn = Route53Connection(**aws_connect_kwargs)
-    except boto.exception.BotoServerError, e:
+    except boto.exception.BotoServerError as e:
         module.fail_json(msg=e.error_message)
 
     results = conn.get_all_hosted_zones()
@@ -162,7 +228,5 @@ def main():
     elif state == 'absent':
         module.exit_json(changed=False)
 
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
-
-main()
+if __name__ == '__main__':
+    main()

@@ -102,12 +102,6 @@ project:
   sample: example project
 '''
 
-try:
-    from cs import CloudStack, CloudStackException, read_config
-    has_lib_cs = True
-except ImportError:
-    has_lib_cs = False
-
 # import cloudstack common
 from ansible.module_utils.cloudstack import *
 
@@ -185,9 +179,6 @@ def main():
         supports_check_mode=True
     )
 
-    if not has_lib_cs:
-        module.fail_json(msg="python library cs required: pip install cs")
-
     try:
         acs_ig = AnsibleCloudStackInstanceGroup(module)
 
@@ -199,7 +190,7 @@ def main():
 
         result = acs_ig.get_result(instance_group)
 
-    except CloudStackException, e:
+    except CloudStackException as e:
         module.fail_json(msg='CloudStackException: %s' % str(e))
 
     module.exit_json(**result)

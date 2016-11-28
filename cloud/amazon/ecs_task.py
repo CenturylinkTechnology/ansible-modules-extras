@@ -22,6 +22,7 @@ description:
     - Creates or deletes instances of task definitions.
 version_added: "2.0"
 author: Mark Chance(@Java1Guy)
+requirements: [ json, boto, botocore, boto3 ]
 options:
     operation:
         description:
@@ -57,6 +58,7 @@ options:
             - A value showing who or what started the task (for informational purposes)
         required: False
 extends_documentation_fragment:
+    - aws
     - ec2
 '''
 
@@ -94,11 +96,63 @@ EXAMPLES = '''
 RETURN = '''
 task:
     description: details about the tast that was started
+    returned: success
     type: complex
-    sample: "TODO: include sample"
+    contains:
+        taskArn:
+            description: The Amazon Resource Name (ARN) that identifies the task.
+            returned: always
+            type: string
+        clusterArn:
+            description: The Amazon Resource Name (ARN) of the of the cluster that hosts the task.
+            returned: only when details is true
+            type: string
+        taskDefinitionArn:
+            description: The Amazon Resource Name (ARN) of the task definition.
+            returned: only when details is true
+            type: string
+        containerInstanceArn:
+            description: The Amazon Resource Name (ARN) of the container running the task.
+            returned: only when details is true
+            type: string
+        overrides:
+            description: The container overrides set for this task.
+            returned: only when details is true
+            type: list of complex
+        lastStatus:
+            description: The last recorded status of the task.
+            returned: only when details is true
+            type: string
+        desiredStatus:
+            description: The desired status of the task.
+            returned: only when details is true
+            type: string
+        containers:
+            description: The container details.
+            returned: only when details is true
+            type: list of complex
+        startedBy:
+            description: The used who started the task.
+            returned: only when details is true
+            type: string
+        stoppedReason:
+            description: The reason why the task was stopped.
+            returned: only when details is true
+            type: string
+        createdAt:
+            description: The timestamp of when the task was created.
+            returned: only when details is true
+            type: string
+        startedAt:
+            description: The timestamp of when the task was started.
+            returned: only when details is true
+            type: string
+        stoppedAt:
+            description: The timestamp of when the task was stopped.
+            returned: only when details is true
+            type: string
 '''
 try:
-    import json
     import boto
     import botocore
     HAS_BOTO = True
@@ -111,6 +165,10 @@ try:
 except ImportError:
     HAS_BOTO3 = False
 
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ec2 import boto3_conn, ec2_argument_spec, get_aws_connection_info
+
+
 class EcsExecManager:
     """Handles ECS Tasks"""
 
@@ -122,8 +180,8 @@ class EcsExecManager:
             if not region:
                 module.fail_json(msg="Region must be specified as a parameter, in EC2_REGION or AWS_REGION environment variables or in boto configuration file")
             self.ecs = boto3_conn(module, conn_type='client', resource='ecs', region=region, endpoint=ec2_url, **aws_connect_kwargs)
-        except boto.exception.NoAuthHandlerFound, e:
-            self.module.fail_json(msg="Can't authorize connection - "+str(e))
+        except boto.exception.NoAuthHandlerFound as e:
+            module.fail_json(msg="Can't authorize connection - %s " % str(e))
 
     def list_tasks(self, cluster_name, service_name, status):
         response = self.ecs.list_tasks(
@@ -262,9 +320,6 @@ def main():
 
     module.exit_json(**results)
 
-# import module snippets
-from ansible.module_utils.basic import *
-from ansible.module_utils.ec2 import *
 
 if __name__ == '__main__':
     main()

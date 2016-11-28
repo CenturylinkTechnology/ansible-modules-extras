@@ -39,7 +39,7 @@ If (($state -Ne $FALSE) -And ($state -NotIn $valid_states)) {
 # Attributes parameter - Pipe separated list of attributes where
 # keys and values are separated by comma (paramA:valyeA|paramB:valueB)
 $attributes = @{};
-If ($params.attributes) {
+If (Get-Member -InputObject $params -Name attributes) {
   $params.attributes -split '\|' | foreach {
     $key, $value = $_ -split "\:";
     $attributes.Add($key, $value);
@@ -90,9 +90,17 @@ try {
       Stop-WebAppPool -Name $name -ErrorAction Stop
       $result.changed = $TRUE
     }
-    if ((($state -eq 'started') -and ($pool.State -eq 'Stopped')) -or ($state -eq 'restarted')) {
+    if ((($state -eq 'started') -and ($pool.State -eq 'Stopped'))) {
       Start-WebAppPool -Name $name -ErrorAction Stop
       $result.changed = $TRUE
+    }
+    if ($state -eq 'restarted') {
+      switch ($pool.State)
+        { 
+          'Stopped' { Start-WebAppPool -Name $name -ErrorAction Stop }
+          default { Restart-WebAppPool -Name $name -ErrorAction Stop }
+        }
+      $result.changed = $TRUE   
     }
   }
 } catch {
@@ -101,12 +109,15 @@ try {
 
 # Result
 $pool = Get-Item IIS:\AppPools\$name
-$result.info = @{
-  name = $pool.Name
-  state = $pool.State
-  attributes =  New-Object psobject @{}
-};
-
-$pool.Attributes | ForEach { $result.info.attributes.Add($_.Name, $_.Value)};
+if ($pool)
+{
+  $result.info = @{
+    name = $pool.Name
+    state = $pool.State
+    attributes =  New-Object psobject @{}
+  };
+  
+  $pool.Attributes | ForEach { $result.info.attributes.Add($_.Name, $_.Value)};
+}
 
 Exit-Json $result

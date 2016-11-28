@@ -144,6 +144,48 @@ options:
     default: null
     required: false
     aliases: []
+  instance_dns:
+    description:
+     - define the instance's Primary DNS server
+    required: false
+    aliases: [ dns ]
+    version_added: "2.1"
+  instance_domain:
+    description:
+     - define the instance's Domain
+    required: false
+    aliases: [ domain ]
+    version_added: "2.1"
+  instance_hostname:
+    description:
+     - define the instance's Hostname
+    required: false
+    aliases: [ hostname ]
+    version_added: "2.1"
+  instance_ip:
+    description:
+     - define the instance's IP
+    required: false
+    aliases: [ ip ]
+    version_added: "2.1"
+  instance_netmask:
+    description:
+     - define the instance's Netmask
+    required: false
+    aliases: [ netmask ]
+    version_added: "2.1"
+  instance_rootpw:
+    description:
+     - define the instance's Root password
+    required: false
+    aliases: [ rootpw ]
+    version_added: "2.1"
+  instance_key:
+    description:
+     - define the instance's Authorized key
+    required: false
+    aliases: [ key ]
+    version_added: "2.1"
   state:
     description:
      - create, terminate or remove instances
@@ -159,52 +201,65 @@ requirements:
 EXAMPLES = '''
 # Basic example provisioning from image.
 
-action: ovirt >
-    user=admin@internal 
-    url=https://ovirt.example.com 
-    instance_name=ansiblevm04 
-    password=secret 
-    image=centos_64 
-    zone=cluster01 
-    resource_type=template"
+ovirt:
+    user: admin@internal
+    url: https://ovirt.example.com
+    instance_name: ansiblevm04
+    password: secret
+    image: centos_64
+    zone: cluster01
+    resource_type: template"
 
 # Full example to create new instance from scratch
-action: ovirt > 
-    instance_name=testansible 
-    resource_type=new 
-    instance_type=server 
-    user=admin@internal 
-    password=secret 
-    url=https://ovirt.example.com 
-    instance_disksize=10 
-    zone=cluster01 
-    region=datacenter1 
-    instance_cpus=1 
-    instance_nic=nic1 
-    instance_network=rhevm 
-    instance_mem=1000 
-    disk_alloc=thin 
-    sdomain=FIBER01 
-    instance_cores=1 
-    instance_os=rhel_6x64 
-    disk_int=virtio"
+ovirt:
+    instance_name: testansible
+    resource_type: new
+    instance_type: server
+    user: admin@internal
+    password: secret
+    url: https://ovirt.example.com
+    instance_disksize: 10
+    zone: cluster01
+    region: datacenter1
+    instance_cpus: 1
+    instance_nic: nic1
+    instance_network: rhevm
+    instance_mem: 1000
+    disk_alloc: thin
+    sdomain: FIBER01
+    instance_cores: 1
+    instance_os: rhel_6x64
+    disk_int: virtio"
 
 # stopping an instance
-action: ovirt >
-    instance_name=testansible
-    state=stopped
-    user=admin@internal
-    password=secret
-    url=https://ovirt.example.com
+ovirt:
+    instance_name: testansible
+    state: stopped
+    user: admin@internal
+    password: secret
+    url: https://ovirt.example.com
 
 # starting an instance
-action: ovirt >
-    instance_name=testansible 
-    state=started 
-    user=admin@internal 
-    password=secret 
-    url=https://ovirt.example.com
+ovirt:
+    instance_name: testansible
+    state: started
+    user: admin@internal
+    password: secret
+    url: https://ovirt.example.com
 
+# starting an instance with cloud init information
+ovirt:
+    instance_name: testansible
+    state: started
+    user: admin@internal
+    password: secret
+    url: https://ovirt.example.com
+    hostname: testansible
+    domain: ansible.local
+    ip: 192.0.2.100
+    netmask: 255.255.255.0
+    gateway: 192.0.2.1
+    rootpw: bigsecret
 
 '''
 
@@ -273,9 +328,24 @@ def create_vm_template(conn, vmname, image, zone):
 
 
 # start instance
-def vm_start(conn, vmname):
+def vm_start(conn, vmname, hostname=None, ip=None, netmask=None, gateway=None,
+             domain=None, dns=None, rootpw=None, key=None):
     vm = conn.vms.get(name=vmname)
-    vm.start()
+    use_cloud_init = False
+    nics = None
+    nic = None
+    if hostname or ip or netmask or gateway or domain or dns or rootpw or key:
+        use_cloud_init = True
+    if ip and netmask and gateway:
+        ipinfo = params.IP(address=ip, netmask=netmask, gateway=gateway)
+        nic = params.GuestNicConfiguration(name='eth0', boot_protocol='STATIC', ip=ipinfo, on_boot=True)
+        nics = params.Nics()
+    nics = params.GuestNicsConfiguration(nic_configuration=[nic])
+    initialization=params.Initialization(regenerate_ssh_keys=True, host_name=hostname, domain=domain, user_name='root',
+                                         root_password=rootpw, nic_configurations=nics, dns_servers=dns,
+                                         authorized_ssh_keys=key)
+    action = params.Action(use_cloud_init=use_cloud_init, vm=params.VM(initialization=initialization))
+    vm.start(action=action)
 
 # Stop instance
 def vm_stop(conn, vmname):
@@ -302,7 +372,6 @@ def vm_remove(conn, vmname):
 # Get the VMs status
 def vm_status(conn, vmname):
     status = conn.vms.get(name=vmname).status.state
-    print "vm status is : %s" % status
     return status
 
 
@@ -311,10 +380,8 @@ def get_vm(conn, vmname):
     vm = conn.vms.get(name=vmname)
     if vm == None:
         name = "empty"
-        print "vmname: %s" % name
     else:
         name = vm.get_name()
-        print "vmname: %s" % name
     return name
 
 # ------------------------------------------------------------------- #
@@ -333,7 +400,7 @@ def main():
             user = dict(required=True),
             url = dict(required=True),
             instance_name = dict(required=True, aliases=['vmname']),
-            password = dict(required=True),
+            password = dict(required=True, no_log=True),
             image = dict(),
             resource_type = dict(choices=['new', 'template']),
             zone = dict(),
@@ -347,6 +414,14 @@ def main():
             disk_int = dict(default='virtio', choices=['virtio', 'ide']),
             instance_os = dict(aliases=['vmos']),
             instance_cores = dict(default=1, aliases=['vmcores']),
+            instance_hostname = dict(aliases=['hostname']),
+            instance_ip = dict(aliases=['ip']),
+            instance_netmask = dict(aliases=['netmask']),
+            instance_gateway = dict(aliases=['gateway']),
+            instance_domain = dict(aliases=['domain']),
+            instance_dns = dict(aliases=['dns']),
+            instance_rootpw = dict(aliases=['rootpw']),
+            instance_key = dict(aliases=['key']),
             sdomain = dict(),
             region = dict(),
         )
@@ -375,10 +450,18 @@ def main():
     vmcores       = module.params['instance_cores']     # number of cores
     sdomain       = module.params['sdomain']            # storage domain to store disk on
     region        = module.params['region']             # oVirt Datacenter
+    hostname      = module.params['instance_hostname']
+    ip            = module.params['instance_ip']
+    netmask       = module.params['instance_netmask']
+    gateway       = module.params['instance_gateway']
+    domain        = module.params['instance_domain']
+    dns           = module.params['instance_dns']
+    rootpw        = module.params['instance_rootpw']
+    key            = module.params['instance_key']
     #initialize connection
     try:
         c = conn(url+"/api", user, password)
-    except Exception, e:
+    except Exception as e:
         module.fail_json(msg='%s' % e)
 
     if state == 'present':
@@ -386,14 +469,14 @@ def main():
             if resource_type == 'template':
                 try:
                     create_vm_template(c, vmname, image, zone)
-                except Exception, e:
+                except Exception as e:
                     module.fail_json(msg='%s' % e)
                 module.exit_json(changed=True, msg="deployed VM %s from template %s"  % (vmname,image))
             elif resource_type == 'new':
                 # FIXME: refactor, use keyword args.
                 try:
                     create_vm(c, vmtype, vmname, zone, vmdisk_size, vmcpus, vmnic, vmnetwork, vmmem, vmdisk_alloc, sdomain, vmcores, vmos, vmdisk_int)
-                except Exception, e:
+                except Exception as e:
                     module.fail_json(msg='%s' % e)
                 module.exit_json(changed=True, msg="deployed VM %s from scratch"  % vmname)
             else:
@@ -405,7 +488,8 @@ def main():
         if vm_status(c, vmname) == 'up':
             module.exit_json(changed=False, msg="VM %s is already running" % vmname)
         else:
-            vm_start(c, vmname)
+            #vm_start(c, vmname)
+            vm_start(c, vmname, hostname, ip, netmask, gateway, domain, dns, rootpw, key)
             module.exit_json(changed=True, msg="VM %s started" % vmname)
 
     if state == 'shutdown':

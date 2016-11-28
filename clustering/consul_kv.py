@@ -99,6 +99,18 @@ options:
           - the port on which the consul agent is running
         required: false
         default: 8500
+    scheme:
+        description:
+          - the protocol scheme on which the consul agent is running
+        required: false
+        default: http
+        version_added: "2.1"
+    validate_certs:
+        description:
+          - whether to verify the tls certificate of the consul agent
+        required: false
+        default: True
+        version_added: "2.1"
 """
 
 
@@ -118,20 +130,22 @@ EXAMPLES = '''
     consul_kv:
       key: ansible/groups/dc1/somenode
       value: 'top_secret'
+
+  - name: Register a key/value pair with an associated session
+    consul_kv:
+      key: stg/node/server_birthday
+      value: 20160509
+      session: "{{ sessionid }}"
+      state: acquire
 '''
 
 import sys
 
 try:
-    import json
-except ImportError:
-    import simplejson as json
-
-try:
     import consul
     from requests.exceptions import ConnectionError
     python_consul_installed = True
-except ImportError, e:
+except ImportError:
     python_consul_installed = False
 
 from requests.exceptions import ConnectionError
@@ -150,6 +164,8 @@ def execute(module):
 
 def lock(module, state):
 
+    consul_api = get_consul_api(module)
+
     session = module.params.get('session')
     key = module.params.get('key')
     value = module.params.get('value')
@@ -159,18 +175,22 @@ def lock(module, state):
             msg='%s of lock for %s requested but no session supplied' %
             (state, key))
 
-    if state == 'acquire':
-        successful = consul_api.kv.put(key, value,
-                                       cas=module.params.get('cas'),
-                                       acquire=session,
-                                       flags=module.params.get('flags'))
-    else:
-        successful = consul_api.kv.put(key, value,
-                                       cas=module.params.get('cas'),
-                                       release=session,
-                                       flags=module.params.get('flags'))
+    index, existing = consul_api.kv.get(key)
 
-    module.exit_json(changed=successful,
+    changed = not existing or (existing and existing['Value'] != value)
+    if changed and not module.check_mode:
+        if state == 'acquire':
+            changed = consul_api.kv.put(key, value,
+                                        cas=module.params.get('cas'),
+                                        acquire=session,
+                                        flags=module.params.get('flags'))
+        else:
+            changed = consul_api.kv.put(key, value,
+                                        cas=module.params.get('cas'),
+                                        release=session,
+                                        flags=module.params.get('flags'))
+
+    module.exit_json(changed=changed,
                      index=index,
                      key=key)
 
@@ -223,13 +243,15 @@ def remove_value(module):
 def get_consul_api(module, token=None):
     return consul.Consul(host=module.params.get('host'),
                          port=module.params.get('port'),
+                         scheme=module.params.get('scheme'),
+                         verify=module.params.get('validate_certs'),
                          token=module.params.get('token'))
 
 def test_dependencies(module):
     if not python_consul_installed:
         module.fail_json(msg="python-consul required for this module. "\
               "see http://python-consul.readthedocs.org/en/latest/#installation")
-    
+
 def main():
 
     argument_spec = dict(
@@ -237,24 +259,27 @@ def main():
         flags=dict(required=False),
         key=dict(required=True),
         host=dict(default='localhost'),
+        scheme=dict(required=False, default='http'),
+        validate_certs=dict(required=False, type='bool', default=True),
         port=dict(default=8500, type='int'),
         recurse=dict(required=False, type='bool'),
-        retrieve=dict(required=False, default=True),
-        state=dict(default='present', choices=['present', 'absent']),
-        token=dict(required=False, default='anonymous'),
-        value=dict(required=False)
+        retrieve=dict(required=False, type='bool', default=True),
+        state=dict(default='present', choices=['present', 'absent', 'acquire', 'release']),
+        token=dict(required=False, no_log=True),
+        value=dict(required=False),
+        session=dict(required=False)
     )
 
     module = AnsibleModule(argument_spec, supports_check_mode=False)
 
     test_dependencies(module)
-        
+
     try:
         execute(module)
-    except ConnectionError, e:
+    except ConnectionError as e:
         module.fail_json(msg='Could not connect to consul agent at %s:%s, error was %s' % (
                             module.params.get('host'), module.params.get('port'), str(e)))
-    except Exception, e:
+    except Exception as e:
         module.fail_json(msg=str(e))
 
 

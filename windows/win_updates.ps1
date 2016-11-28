@@ -121,6 +121,11 @@ $job_body = {
             $update.AcceptEula()
           }
 
+          if($update.IsHidden) {
+            Write-DebugLog "Skipping hidden update $($update.Title)"
+            continue
+          }
+
           Write-DebugLog "Adding update $($update.Identity.UpdateID) - $($update.Title)"
           $res = $updates_to_install.Add($update)
 
@@ -275,7 +280,7 @@ Function DestroyScheduledJob {
       $running_tasks = @($schedserv.GetRunningTasks(0) | Where-Object { $_.Name -eq $job_name })
 
       Foreach($task_to_stop in $running_tasks) {
-          Write-DebugLog "Stopping running task $($task_to_stop.InstanceId)..."
+          Write-DebugLog "Stopping running task $($task_to_stop.InstanceGuid)..."
           $task_to_stop.Stop()
       }
 
@@ -307,7 +312,7 @@ Function RunAsScheduledJob {
   $schedjob = Register-ScheduledJob @rsj_args
 
   # RunAsTask isn't available in PS3- fall back to a 2s future trigger
-  if($schedjob.RunAsTask) {
+  if($schedjob | Get-Member -Name RunAsTask) {
     Write-DebugLog "Starting scheduled job (PS4 method)"
     $schedjob.RunAsTask()
   }
@@ -337,8 +342,8 @@ Function RunAsScheduledJob {
   $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
   # NB: output from scheduled jobs is delayed after completion (including the sub-objects after the primary Output object is available)
-  While (($job.Output -eq $null -or $job.Output.job_output -eq $null) -and $sw.ElapsedMilliseconds -lt 15000) {
-    Write-DebugLog "Waiting for job output to be non-null..."
+  While (($job.Output -eq $null -or -not ($job.Output | Get-Member -Name Keys -ErrorAction Ignore) -or -not $job.Output.Keys.Contains('job_output')) -and $sw.ElapsedMilliseconds -lt 15000) {
+    Write-DebugLog "Waiting for job output to populate..."
     Start-Sleep -Milliseconds 500
   }
 
@@ -351,7 +356,7 @@ Function RunAsScheduledJob {
       DebugOutput = $job.Debug
   }
 
-  If ($job.Output -eq $null -or $job.Output.job_output -eq $null) {
+  If ($job.Output -eq $null -or -not $job.Output.Keys.Contains('job_output')) {
       $ret.Output = @{failed = $true; msg = "job output was lost"}
   }
   Else {
@@ -372,6 +377,7 @@ Function Log-Forensics {
     Write-DebugLog "Arguments: $job_args | out-string"
     Write-DebugLog "OS Version: $([environment]::OSVersion.Version | out-string)"
     Write-DebugLog "Running as user: $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+    Write-DebugLog "Powershell version: $($PSVersionTable | out-string)"
     # FUTURE: log auth method (kerb, password, etc)
 }
 
@@ -404,7 +410,7 @@ $parsed_args = Parse-Args $args $true
 $parsed_args.psobject.properties | foreach -begin {$job_args=@{}} -process {$job_args."$($_.Name)" = $_.Value} -end {$job_args}
 
 # set the log_path for the global log function we injected earlier
-$log_path = $job_args.log_path
+$log_path = $job_args['log_path']
 
 Log-Forensics
 

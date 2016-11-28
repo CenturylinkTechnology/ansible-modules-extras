@@ -52,7 +52,7 @@ options:
     default: null
   password:
     description:
-      - Encryption password, the path to a file containing the pasword, or
+      - Encryption password, the path to a file containing the password, or
         'none' or '-' if the password should be entered at boot.
     required: false
     default: "none"
@@ -73,14 +73,17 @@ author: "Steve (@groks)"
 '''
 
 EXAMPLES = '''
-- name: Set the options explicitly a deivce which must already exist
+- name: Set the options explicitly a device which must already exist
   crypttab: name=luks-home state=present opts=discard,cipher=aes-cbc-essiv:sha256
 
 - name: Add the 'discard' option to any existing options for all devices
   crypttab: name={{ item.device }} state=opts_present opts=discard
-  with_items: ansible_mounts
+  with_items: "{{ ansible_mounts }}"
   when: '/dev/mapper/luks-' in {{ item.device }}
 '''
+
+from ansible.module_utils.basic import *
+from ansible.module_utils.pycompat24 import get_exception
 
 def main():
 
@@ -89,9 +92,9 @@ def main():
             name           = dict(required=True),
             state          = dict(required=True, choices=['present', 'absent', 'opts_present', 'opts_absent']),
             backing_device = dict(default=None),
-            password       = dict(default=None),
+            password       = dict(default=None, type='path'),
             opts           = dict(default=None),
-            path           = dict(default='/etc/crypttab')
+            path           = dict(default='/etc/crypttab', type='path')
         ),
         supports_check_mode = True
     )
@@ -126,7 +129,8 @@ def main():
     try:
         crypttab = Crypttab(path)
         existing_line = crypttab.match(name)
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg="failed to open and parse crypttab file: %s" % e,
                          **module.params)
 
@@ -205,6 +209,8 @@ class Crypttab(object):
         for line in self._lines:
             lines.append(str(line))
         crypttab = '\n'.join(lines)
+        if len(crypttab) == 0:
+            crypttab += '\n'
         if crypttab[-1] != '\n':
             crypttab += '\n'
         return crypttab
@@ -252,18 +258,18 @@ class Line(object):
     def _split_line(self, line):
         fields = line.split()
         try:
-            field2 = field[2]
+            field2 = fields[2]
         except IndexError:
             field2 = None
         try:
-            field3 = field[3]
+            field3 = fields[3]
         except IndexError:
             field3 = None
 
         return (fields[0],
                 fields[1],
                 field2,
-                fields3)
+                field3)
 
     def remove(self):
         self.line, self.name, self.backing_device = '', None, None
@@ -306,7 +312,7 @@ class Options(dict):
     def add(self, opts_string):
         changed = False
         for k, v in Options(opts_string).items():
-            if self.has_key(k):
+            if k in self:
                 if self[k] != v:
                     changed = True
             else:
@@ -317,7 +323,7 @@ class Options(dict):
     def remove(self, opts_string):
         changed = False
         for k in Options(opts_string):
-            if self.has_key(k):
+            if k in self:
                 del self[k]
                 changed = True
         return changed, 'removed options'
@@ -335,7 +341,7 @@ class Options(dict):
         return iter(self.itemlist)
 
     def __setitem__(self, key, value):
-        if not self.has_key(key):
+        if key not in self:
             self.itemlist.append(key)
         super(Options, self).__setitem__(key, value)
 
@@ -356,6 +362,4 @@ class Options(dict):
                 ret.append('%s=%s' % (k, v))
         return ','.join(ret)
 
-# import module snippets
-from ansible.module_utils.basic import *
 main()

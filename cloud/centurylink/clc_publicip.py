@@ -118,11 +118,6 @@ EXAMPLES = '''
 '''
 
 RETURN = '''
-changed:
-    description: A flag indicating if any change was made or not
-    returned: success
-    type: boolean
-    sample: True
 server_ids:
     description: The list of server ids that are changed
     returned: success
@@ -136,6 +131,7 @@ server_ids:
 
 __version__ = '${version}'
 
+import os
 from distutils.version import LooseVersion
 
 try:
@@ -157,6 +153,8 @@ except ImportError:
     clc_sdk = None
 else:
     CLC_FOUND = True
+
+from ansible.module_utils.basic import AnsibleModule
 
 
 class ClcPublicIp(object):
@@ -296,7 +294,7 @@ class ClcPublicIp(object):
         try:
             for ip_address in server.PublicIPs().public_ips:
                     result = ip_address.Delete()
-        except CLCException, ex:
+        except CLCException as ex:
             self.module.fail_json(msg='Failed to remove public ip from the server : {0}. {1}'.format(
                 server.id, ex.response_text
             ))
@@ -376,6 +374,6 @@ def main():
     clc_public_ip = ClcPublicIp(module)
     clc_public_ip.process_request()
 
-from ansible.module_utils.basic import *  # pylint: disable=W0614
+
 if __name__ == '__main__':
     main()

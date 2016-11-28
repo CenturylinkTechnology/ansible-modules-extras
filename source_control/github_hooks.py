@@ -18,7 +18,15 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-import json
+try:
+    import json
+except ImportError:
+    try:
+        import simplejson as json
+    except ImportError:
+        # Let snippet from module_utils/basic.py return a proper error in this case
+        pass
+
 import base64
 
 DOCUMENTATION = '''
@@ -49,7 +57,7 @@ options:
     description:
       - This tells the githooks module what you want it to do.
     required: true
-    choices: [ "create", "cleanall" ]
+    choices: [ "create", "cleanall", "list", "clean504" ]
   validate_certs:
     description:
       - If C(no), SSL certificates for the target repo will not be validated. This should only be used
@@ -144,9 +152,9 @@ def _delete(module, hookurl, oauthkey, repo, user, hookid):
 def main():
     module = AnsibleModule(
         argument_spec=dict(
-        action=dict(required=True),
+        action=dict(required=True, choices=['list','clean504','cleanall','create']),
         hookurl=dict(required=False),
-        oauthkey=dict(required=True),
+        oauthkey=dict(required=True, no_log=True),
         repo=dict(required=True),
         user=dict(required=True),
         validate_certs=dict(default='yes', type='bool'),

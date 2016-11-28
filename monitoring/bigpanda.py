@@ -83,19 +83,11 @@ EXAMPLES = '''
 ...
 - bigpanda: component=myapp version=1.3 token={{ bigpanda_token }} state=finished
 
-or using a deployment object:
-- bigpanda: component=myapp version=1.3 token={{ bigpanda_token }} state=started
-  register: deployment
-
-- bigpanda: state=finished
-  args: deployment
-
-If outside servers aren't reachable from your machine, use local_action and pass the hostname:
-- local_action: bigpanda component=myapp version=1.3 hosts={{ansible_hostname}} token={{ bigpanda_token }} state=started
+If outside servers aren't reachable from your machine, use local_action and override hosts:
+- local_action: bigpanda component=myapp version=1.3 token={{ bigpanda_token }} hosts={{ansible_hostname}} state=started
   register: deployment
 ...
-- local_action: bigpanda state=finished
-  args: deployment
+- local_action: bigpanda component=deployment.component version=deployment.version token=deployment.token state=finished
 '''
 
 # ===========================================
@@ -109,7 +101,7 @@ def main():
         argument_spec=dict(
             component=dict(required=True, aliases=['name']),
             version=dict(required=True),
-            token=dict(required=True),
+            token=dict(required=True, no_log=True),
             state=dict(required=True, choices=['started', 'finished', 'failed']),
             hosts=dict(required=False, default=[socket.gethostname()], aliases=['host']),
             env=dict(required=False),
@@ -178,11 +170,13 @@ def main():
             module.exit_json(changed=True, **deployment)
         else:
             module.fail_json(msg=json.dumps(info))
-    except Exception, e:
+    except Exception:
+        e = get_exception()
         module.fail_json(msg=str(e))
 
 # import module snippets
 from ansible.module_utils.basic import *
 from ansible.module_utils.urls import *
+from ansible.module_utils.pycompat24 import get_exception
 if __name__ == '__main__':
     main()
