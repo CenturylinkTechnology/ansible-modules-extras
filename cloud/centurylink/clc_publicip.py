@@ -257,7 +257,7 @@ class ClcPublicIp(object):
         result = None
         try:
             result = server.PublicIPs().Add(ports=ports_to_expose, source_restrictions=source_restrictions)
-        except CLCException, ex:
+        except CLCException as ex:
             self.module.fail_json(msg='Failed to add public ip to the server : {0}. {1}'.format(
                 server.id, ex.response_text
             ))
